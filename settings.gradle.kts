@@ -15,7 +15,7 @@ pluginManagement {
 }
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-    id("fabric-loom") version "1.14.7"
+    id("net.fabricmc.fabric-loom") version "1.18.4" apply false
 }
 dependencyResolutionManagement {
     repositories {
@@ -60,15 +60,19 @@ includeBuild("build-logic")
 
 include("worldedit-libs")
 
-listOf("1_20_2", "1_20_4", "1_20_5", "1_21", "1_21_4", "1_21_5", "1_21_6", "1_21_9", "1_21_11").forEach {
-    include("worldedit-bukkit:adapters:adapter-$it")
+val fabricOnly = providers.gradleProperty("fabricOnly").map(String::toBoolean).getOrElse(false)
+if (!fabricOnly) {
+    listOf("1_21", "1_21_4", "1_21_5", "1_21_6", "1_21_9", "1_21_11", "26.1", "26.2", "26.3").forEach {
+        include("worldedit-bukkit:adapters:adapter-$it")
+    }
 }
 
-listOf("bukkit", "core", "fabric", "cli").forEach {
+val platforms = if (fabricOnly) listOf("core", "fabric") else listOf("bukkit", "core", "fabric", "cli")
+platforms.forEach {
     include("worldedit-libs:$it")
     include("worldedit-$it")
 }
 include("worldedit-libs:core:ap")
 
 
-enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+// enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")

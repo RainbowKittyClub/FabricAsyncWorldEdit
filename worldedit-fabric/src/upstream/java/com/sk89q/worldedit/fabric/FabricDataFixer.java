@@ -127,16 +127,19 @@ class FabricDataFixer implements com.sk89q.worldedit.world.DataFixer {
     }
 
     private String fixBlockState(String blockState, int srcVer) {
-        net.minecraft.nbt.CompoundTag stateNBT = stateToNBT(blockState);
+        net.minecraft.nbt.CompoundTag stateNBT = stateToNBT(blockState, srcVer);
         Dynamic<Tag> dynamic = new Dynamic<>(OPS_NBT, stateNBT);
         net.minecraft.nbt.CompoundTag fixed = (net.minecraft.nbt.CompoundTag) INSTANCE.fixer.update(References.BLOCK_STATE, dynamic, srcVer, DATA_VERSION).getValue();
         return nbtToState(fixed);
     }
 
     private String nbtToState(net.minecraft.nbt.CompoundTag tagCompound) {
+        if (tagCompound.isEmpty()) {
+            return "";
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append(tagCompound.getString("Name").get());
-        tagCompound.getCompound("Properties").ifPresent(props -> {
+        sb.append(tagCompound.getString("id").orElseThrow());
+        tagCompound.getCompound("properties").ifPresent(props -> {
             sb.append('[');
             sb.append(props.keySet().stream().map(k -> k + "=" + props.getString(k).get().replace("\"", "")).collect(Collectors.joining(",")));
             sb.append(']');
@@ -144,13 +147,15 @@ class FabricDataFixer implements com.sk89q.worldedit.world.DataFixer {
         return sb.toString();
     }
 
-    private static net.minecraft.nbt.CompoundTag stateToNBT(String blockState) {
+    private static net.minecraft.nbt.CompoundTag stateToNBT(String blockState, int srcVer) {
+        String idKey = srcVer < 5006 ? "Name" : "id";
+        String propertiesKey = srcVer < 5006 ? "Properties" : "properties";
         int propIdx = blockState.indexOf('[');
         net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
         if (propIdx < 0) {
-            tag.putString("Name", blockState);
+            tag.putString(idKey, blockState);
         } else {
-            tag.putString("Name", blockState.substring(0, propIdx));
+            tag.putString(idKey, blockState.substring(0, propIdx));
             net.minecraft.nbt.CompoundTag propTag = new net.minecraft.nbt.CompoundTag();
             String props = blockState.substring(propIdx + 1, blockState.length() - 1);
             String[] propArr = props.split(",");
@@ -158,7 +163,7 @@ class FabricDataFixer implements com.sk89q.worldedit.world.DataFixer {
                 final String[] split = pair.split("=");
                 propTag.putString(split[0], split[1]);
             }
-            tag.put("Properties", propTag);
+            tag.put(propertiesKey, propTag);
         }
         return tag;
     }

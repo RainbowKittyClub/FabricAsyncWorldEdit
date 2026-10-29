@@ -57,6 +57,7 @@ import com.sk89q.worldedit.util.Location;
 import com.sk89q.worldedit.util.SideEffect;
 import com.sk89q.worldedit.util.SideEffectSet;
 import com.sk89q.worldedit.util.TreeGenerator.TreeType;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import com.sk89q.worldedit.util.concurrency.LazyReference;
 import com.sk89q.worldedit.util.io.file.SafeFiles;
 import com.sk89q.worldedit.world.AbstractWorld;
@@ -104,15 +105,14 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
-import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
+import net.minecraft.world.level.saveddata.WeatherData;
+import net.minecraft.world.level.levelgen.feature.Feature;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
-import net.minecraft.world.level.storage.DerivedLevelData;
 import net.minecraft.world.level.storage.LevelData;
 import net.minecraft.world.level.storage.LevelStorageSource;
-import net.minecraft.world.level.storage.PrimaryLevelData;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.phys.AABB;
@@ -130,7 +130,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -337,6 +336,9 @@ public class FabricWorld extends AbstractWorld {
             return false;
         }
 
+        if (options.getSeed().isPresent()) {
+            throw new UnsupportedOperationException("26.3 worldgen does not support overriding the seed for regen");
+        }
         try {
             doRegen(region, extent, options);
         } catch (Exception e) {
@@ -351,14 +353,6 @@ public class FabricWorld extends AbstractWorld {
         LevelStorageSource levelStorage = LevelStorageSource.createDefault(tempDir);
         try (LevelStorageSource.LevelStorageAccess session = levelStorage.createAccess("WorldEditTempGen")) {
             ServerLevel originalWorld = (ServerLevel) getWorld();
-            PrimaryLevelData levelProperties = getPrimaryLevelData(originalWorld.getLevelData());
-            WorldOptions originalOpts = levelProperties.worldGenOptions();
-
-            long seed = options.getSeed().orElse(originalWorld.getSeed());
-            levelProperties.worldOptions = options.getSeed().isPresent()
-                ? originalOpts.withSeed(OptionalLong.of(seed))
-                : originalOpts;
-
             ResourceKey<Level> worldRegKey = originalWorld.dimension();
             try (ServerLevel serverWorld = new ServerLevel(
                 originalWorld.getServer(), Util.backgroundExecutor(), session,
@@ -369,34 +363,19 @@ public class FabricWorld extends AbstractWorld {
                     originalWorld.getChunkSource().getGenerator()
                 ),
                 originalWorld.isDebug(),
-                seed,
+                originalWorld.getSeed(),
                 // No spawners are needed for this world.
                 ImmutableList.of(),
                 // This controls ticking, we don't need it so set it to false.
-                false,
-                originalWorld.getRandomSequences()
+                false
             )) {
                 regenForWorld(region, extent, serverWorld, options);
 
                 // drive the server executor until all tasks are popped off
-                while (originalWorld.getServer().pollTask()) {
-                    Thread.yield();
-                }
-            } finally {
-                levelProperties.worldOptions = originalOpts;
+                originalWorld.getServer().managedBlock(() -> originalWorld.getServer().getPendingTasksCount() == 0);
             }
         } finally {
             SafeFiles.tryHardToDeleteDir(tempDir);
-        }
-    }
-
-    private static PrimaryLevelData getPrimaryLevelData(LevelData levelData) {
-        if (levelData instanceof DerivedLevelData derivedLevelData) {
-            return getPrimaryLevelData(derivedLevelData.wrapped);
-        } else if (levelData instanceof PrimaryLevelData primaryLevelData) {
-            return primaryLevelData;
-        } else {
-            throw new IllegalStateException("Unknown level data type: " + levelData.getClass());
         }
     }
 
@@ -426,7 +405,7 @@ public class FabricWorld extends AbstractWorld {
 
         for (BlockVector3 vec : region) {
             BlockPos pos = FabricAdapter.toBlockPos(vec);
-            ChunkAccess chunk = chunks.get(new ChunkPos(pos));
+            ChunkAccess chunk = chunks.get(ChunkPos.containing(pos));
             BlockStateHolder<?> state = FabricAdapter.adapt(chunk.getBlockState(pos));
             BlockEntity blockEntity = chunk.getBlockEntity(pos);
             if (blockEntity != null) {
@@ -457,7 +436,7 @@ public class FabricWorld extends AbstractWorld {
     }
 
     @Nullable
-    private static ResourceKey<ConfiguredFeature<?, ?>> createTreeFeatureGenerator(TreeType type) {
+    private static ResourceKey<Feature> createTreeFeatureGenerator(TreeType type) {
         return switch (type) {
             // Based off of the SaplingGenerator class, as well as uses of DefaultBiomeFeatures fields
             case TREE -> TreeFeatures.OAK;
@@ -492,8 +471,8 @@ public class FabricWorld extends AbstractWorld {
     @Override
     public boolean generateTree(TreeType type, EditSession editSession, BlockVector3 position) throws MaxChangedBlocksException {
         ServerLevel world = (ServerLevel) getWorld();
-        ConfiguredFeature<?, ?> generator = Optional.ofNullable(createTreeFeatureGenerator(type))
-            .map(k -> world.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE).getValue(k))
+        Feature generator = Optional.ofNullable(createTreeFeatureGenerator(type))
+            .map(k -> world.registryAccess().lookupOrThrow(Registries.FEATURE).getValue(k))
             .orElse(null);
         ServerChunkCache chunkManager = world.getChunkSource();
         if (type == TreeType.CHORUS_PLANT) {
@@ -507,9 +486,21 @@ public class FabricWorld extends AbstractWorld {
         }
     }
 
+    @Override
+    public boolean generateTree(com.sk89q.worldedit.world.generation.TreeType type,
+            EditSession editSession, BlockVector3 position) throws MaxChangedBlocksException {
+        ServerLevel world = (ServerLevel) getWorld();
+        PlacedFeature generator = world.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE)
+            .getValue(Identifier.parse(type.id()));
+        try (FabricServerLevelDelegateProxy.LevelAndProxy proxyLevel = FabricServerLevelDelegateProxy.newInstance(editSession, world)) {
+            return generator != null && generator.place(proxyLevel.level(),
+                world.getChunkSource().getGenerator(), random, FabricAdapter.toBlockPos(position));
+        }
+    }
+
     public boolean generateFeature(ConfiguredFeatureType type, EditSession editSession, BlockVector3 position) {
         ServerLevel world = (ServerLevel) getWorld();
-        ConfiguredFeature<?, ?> feature = world.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE).getValue(Identifier.tryParse(type.id()));
+        Feature feature = world.registryAccess().lookupOrThrow(Registries.FEATURE).getValue(Identifier.tryParse(type.id()));
         ServerChunkCache chunkManager = world.getChunkSource();
         try (FabricServerLevelDelegateProxy.LevelAndProxy proxyLevel = FabricServerLevelDelegateProxy.newInstance(editSession, world)) {
             return feature != null && feature.place(
@@ -532,11 +523,13 @@ public class FabricWorld extends AbstractWorld {
 
         ServerChunkCache chunkManager = world.getChunkSource();
         try (FabricServerLevelDelegateProxy.LevelAndProxy proxyLevel = FabricServerLevelDelegateProxy.newInstance(editSession, world)) {
-            ChunkPos chunkPos = new ChunkPos(new BlockPos(position.x(), position.y(), position.z()));
+            ChunkPos chunkPos = ChunkPos.containing(new BlockPos(position.x(), position.y(), position.z()));
             StructureStart structureStart = structure.generate(
                 structureRegistry.wrapAsHolder(structure), world.dimension(), world.registryAccess(),
-                chunkManager.getGenerator(), chunkManager.getGenerator().getBiomeSource(), chunkManager.randomState(),
-                world.getStructureManager(), world.getSeed(), chunkPos, 0, proxyLevel.level(),
+                chunkManager.getGenerator(), chunkManager.getGenerator().getBiomeSource(),
+                chunkManager.randomState().createClimateSampler(SamplerContext.builder().enableCaches().build()),
+                chunkManager.randomState(),
+                world.getStructureTemplateManager(), world.getSeed(), chunkPos, 0, proxyLevel.level(),
                 biome -> true
             );
 
@@ -598,7 +591,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public WeatherType getWeather() {
-        LevelData info = getWorld().getLevelData();
+        WeatherData info = getWorld().getServer().getWeatherData();
         if (info.isThundering()) {
             return WeatherTypes.THUNDER_STORM;
         }
@@ -610,7 +603,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public long getRemainingWeatherDuration() {
-        ServerLevelData info = (ServerLevelData) getWorld().getLevelData();
+        WeatherData info = getWorld().getServer().getWeatherData();
         if (info.isThundering()) {
             return info.getThunderTime();
         }
@@ -627,7 +620,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public void setWeather(WeatherType weatherType, long duration) {
-        ServerLevelData info = (ServerLevelData) getWorld().getLevelData();
+        WeatherData info = getWorld().getServer().getWeatherData();
         if (weatherType == WeatherTypes.THUNDER_STORM) {
             info.setClearWeatherTime(0);
             info.setThundering(true);
@@ -734,7 +727,7 @@ public class FabricWorld extends AbstractWorld {
     public Entity createEntity(Location location, BaseEntity entity) {
         ServerLevel world = (ServerLevel) getWorld();
         String entityId = entity.getType().id();
-        final Optional<EntityType<?>> entityType = EntityType.byString(entityId);
+        final Optional<EntityType<?>> entityType = world.registryAccess().lookupOrThrow(Registries.ENTITY_TYPE).getOptional(Identifier.parse(entityId));
         if (entityType.isEmpty()) {
             return null;
         }
@@ -748,7 +741,7 @@ public class FabricWorld extends AbstractWorld {
         }
         tag.putString("id", entityId);
 
-        net.minecraft.world.entity.Entity createdEntity = EntityType.loadEntityRecursive(tag, world, EntitySpawnReason.COMMAND, (loadedEntity) -> {
+        net.minecraft.world.entity.Entity createdEntity = EntityType.loadEntityRecursive(entityType.get(), tag, world, EntitySpawnReason.COMMAND, (loadedEntity) -> {
             loadedEntity.absSnapTo(location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
             return loadedEntity;
         });
@@ -803,7 +796,14 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public boolean tile(int x, int y, int z, FaweCompoundTag tile) throws WorldEditException {
-        return false;
+        return com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
+            BlockPos pos = new BlockPos(x, y, z);
+            boolean applied = worldNativeAccess.updateTileEntity(pos, tile.linTag());
+            if (applied) {
+                ((ServerLevel) getWorld()).getChunkSource().blockChanged(pos);
+            }
+            return applied;
+        });
     }
 
     private static final class LiquidMask extends AbstractExtentMask {

@@ -21,67 +21,20 @@ package com.sk89q.worldedit.fabric.mixin;
 
 import com.sk89q.worldedit.fabric.internal.ExtendedChunk;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.PalettedContainerFactory;
-import net.minecraft.world.level.chunk.UpgradeData;
-import net.minecraft.world.level.levelgen.blending.BlendingData;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.Slice;
 
 import javax.annotation.Nullable;
 
 @Mixin(LevelChunk.class)
-public abstract class MixinLevelChunkSetBlockHook extends ChunkAccess implements ExtendedChunk {
-    @Unique
-    private boolean shouldUpdate = true;
-
-    public MixinLevelChunkSetBlockHook(ChunkPos chunkPos, UpgradeData upgradeData, LevelHeightAccessor levelHeightAccessor, PalettedContainerFactory palettedContainerFactory, long l, @org.jetbrains.annotations.Nullable LevelChunkSection[] levelChunkSections, @org.jetbrains.annotations.Nullable BlendingData blendingData) {
-        super(chunkPos, upgradeData, levelHeightAccessor, palettedContainerFactory, l, levelChunkSections, blendingData);
-    }
-
-    @Unique
+public abstract class MixinLevelChunkSetBlockHook implements ExtendedChunk {
     @Nullable
     @Override
-    public BlockState setBlockState(BlockPos pos, BlockState state, int flag, boolean update) {
-        // save the state for the hook
-        shouldUpdate = update;
-        try {
-            return setBlockState(pos, state, flag);
-        } finally {
-            // restore natural mode
-            shouldUpdate = true;
-        }
-    }
-
-    @Redirect(
-        method = "setBlockState",
-        slice = @Slice(
-            from = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockState;is(Lnet/minecraft/world/level/block/Block;)Z")
-        ),
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockState;onPlace(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)V")
-    )
-    public void setBlockStateHook(BlockState target, Level world, BlockPos pos, BlockState old, boolean move) {
-        boolean localShouldUpdate;
-        MinecraftServer server = world.getServer();
-        if (server == null || Thread.currentThread() != server.getRunningThread()) {
-            // We're not on the server thread for some reason, WorldEdit will never be here
-            // so we'll just ignore our flag
-            localShouldUpdate = true;
-        } else {
-            localShouldUpdate = shouldUpdate;
-        }
-        if (localShouldUpdate) {
-            target.onPlace(world, pos, old, move);
-        }
+    public BlockState setBlockState(BlockPos pos, BlockState state, int flags, boolean update) {
+        // Vanilla now provides the side-effect switch; no redirect or mutable chunk flag is needed.
+        return ((LevelChunk) (Object) this).setBlockState(pos, state,
+            update ? flags : flags | Block.UPDATE_SKIP_ON_PLACE);
     }
 }

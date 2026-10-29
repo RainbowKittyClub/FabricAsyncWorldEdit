@@ -49,6 +49,10 @@ import com.sk89q.worldedit.world.entity.EntityType;
 import com.sk89q.worldedit.world.gamemode.GameModes;
 import com.sk89q.worldedit.world.generation.ConfiguredFeatureType;
 import com.sk89q.worldedit.world.generation.StructureType;
+import com.sk89q.worldedit.world.generation.TreeType;
+import net.minecraft.world.level.levelgen.feature.TreeFeature;
+import net.minecraft.world.level.levelgen.feature.FallenTreeFeature;
+import net.minecraft.world.level.levelgen.feature.CoralTreeFeature;
 import com.sk89q.worldedit.world.item.ItemCategory;
 import com.sk89q.worldedit.world.item.ItemType;
 import com.sk89q.worldedit.world.weather.WeatherTypes;
@@ -287,7 +291,7 @@ public class FabricWorldEdit implements ModInitializer {
             }
         });
         // Features
-        for (Identifier name : server.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE).keySet()) {
+        for (Identifier name : server.registryAccess().lookupOrThrow(Registries.FEATURE).keySet()) {
             String key = name.toString();
             if (ConfiguredFeatureType.REGISTRY.get(key) == null) {
                 ConfiguredFeatureType.REGISTRY.register(key, new ConfiguredFeatureType(key));
@@ -298,6 +302,17 @@ public class FabricWorldEdit implements ModInitializer {
             String key = name.toString();
             if (StructureType.REGISTRY.get(key) == null) {
                 StructureType.REGISTRY.register(key, new StructureType(key));
+            }
+        }
+        var placedFeatures = server.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
+        for (Identifier name : placedFeatures.keySet()) {
+            var feature = placedFeatures.getValue(name).feature().value();
+            if (feature instanceof TreeFeature || feature instanceof FallenTreeFeature
+                    || feature instanceof CoralTreeFeature) {
+                String key = name.toString();
+                if (TreeType.REGISTRY.get(key) == null) {
+                    TreeType.REGISTRY.register(key, new TreeType(key));
+                }
             }
         }
         // Force lazy static init for generic game values used by parsers.

@@ -89,24 +89,20 @@ public class FabricBlockRegistry extends BundledBlockRegistry {
                 continue;
             }
             net.minecraft.world.level.block.state.BlockState state = block.defaultBlockState();
-            Map<net.minecraft.world.level.block.state.properties.Property<?>, Comparable<?>> values = state.getValues();
+            var values = state.getValues().sorted(Comparator.comparing(v -> v.property().getName())).toList();
             if (values.isEmpty()) {
                 blocks.add(id.toString());
                 continue;
             }
             StringBuilder builder = new StringBuilder(id.toString()).append('[');
             boolean first = true;
-            for (Map.Entry<net.minecraft.world.level.block.state.properties.Property<?>, Comparable<?>> entry : values.entrySet()
-                .stream()
-                .sorted(Comparator.comparing(e -> e.getKey().getName()))
-                .toList()
-            ) {
+            for (var entry : values) {
                 if (!first) {
                     builder.append(',');
                 }
                 first = false;
-                builder.append(entry.getKey().getName()).append('=');
-                Comparable<?> value = entry.getValue();
+                builder.append(entry.property().getName()).append('=');
+                Comparable<?> value = entry.value();
                 if (value instanceof StringRepresentable stringRepresentable) {
                     builder.append(stringRepresentable.getSerializedName());
                 } else {

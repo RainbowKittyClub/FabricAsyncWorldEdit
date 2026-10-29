@@ -79,18 +79,18 @@ public class FabricTransmogrifier {
         return PROPERTY_CACHE.getUnchecked(property);
     }
 
-    private static Map<Property<?>, Object> transmogToWorldEditProperties(BlockType block, Map<net.minecraft.world.level.block.state.properties.Property<?>, Comparable<?>> mcProps) {
+    private static Map<Property<?>, Object> transmogToWorldEditProperties(BlockType block, java.util.stream.Stream<net.minecraft.world.level.block.state.properties.Property.Value<?>> mcProps) {
         Map<Property<?>, Object> props = new TreeMap<>(Comparator.comparing(Property::getName));
-        for (Map.Entry<net.minecraft.world.level.block.state.properties.Property<?>, Comparable<?>> prop : mcProps.entrySet()) {
-            Object value = prop.getValue();
-            if (prop.getKey() instanceof net.minecraft.world.level.block.state.properties.EnumProperty) {
-                if (prop.getKey().getValueClass() == net.minecraft.core.Direction.class) {
+        for (var prop : mcProps.toList()) {
+            Object value = prop.value();
+            if (prop.property() instanceof net.minecraft.world.level.block.state.properties.EnumProperty) {
+                if (prop.property().getValueClass() == net.minecraft.core.Direction.class) {
                     value = FabricAdapter.adaptEnumFacing((net.minecraft.core.Direction) value);
                 } else {
                     value = ((StringRepresentable) value).getSerializedName();
                 }
             }
-            props.put(block.getProperty(prop.getKey().getName()), value);
+            props.put(block.getProperty(prop.property().getName()), value);
         }
         return props;
     }
@@ -129,9 +129,14 @@ public class FabricTransmogrifier {
         return transmogToMinecraftProperties(mcBlock.getStateDefinition(), newState, states);
     }
 
+    @SuppressWarnings("unchecked")
     public static com.sk89q.worldedit.world.block.BlockState transmogToWorldEdit(net.minecraft.world.level.block.state.BlockState blockState) {
         BlockType blockType = FabricAdapter.adapt(blockState.getBlock());
-        return blockType.getState(transmogToWorldEditProperties(blockType, blockState.getValues()));
+        BlockState result = blockType.getDefaultState();
+        for (var entry : transmogToWorldEditProperties(blockType, blockState.getValues()).entrySet()) {
+            result = result.with((Property<Object>) entry.getKey(), entry.getValue());
+        }
+        return result;
     }
 
     private FabricTransmogrifier() {

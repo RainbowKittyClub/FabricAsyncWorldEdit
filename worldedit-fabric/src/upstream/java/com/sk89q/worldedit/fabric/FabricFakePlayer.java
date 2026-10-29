@@ -54,7 +54,7 @@ public class FabricFakePlayer extends ServerPlayer {
     }
 
     @Override
-    public void displayClientMessage(Component message, boolean actionBar) {
-        super.displayClientMessage(message, actionBar);
+    public void sendSystemMessage(Component message, boolean actionBar) {
+        // Fake players have no network connection.
     }
 }

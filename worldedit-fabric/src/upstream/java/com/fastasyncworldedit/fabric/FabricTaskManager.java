@@ -1,122 +1,172 @@
 package com.fastasyncworldedit.fabric;
 
-import com.fastasyncworldedit.core.util.TaskManager;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
+import javax.annotation.Nonnull;
+
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+
 import net.minecraft.server.MinecraftServer;
 
-import javax.annotation.Nonnull;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
+import com.fastasyncworldedit.core.util.TaskManager;
 
+/** Runs delayed work on server ticks and rejects submissions outside the server lifecycle. */
 public class FabricTaskManager extends TaskManager {
-
-    private static final long TICK_MS = 50L;
-
     private final Supplier<MinecraftServer> serverSupplier;
-    private final ScheduledExecutorService mainScheduler;
-    private final ScheduledExecutorService asyncScheduler;
-    private final AtomicInteger nextId = new AtomicInteger(1);
-    private final Map<Integer, ScheduledFuture<?>> tasks = new ConcurrentHashMap<>();
+    private final ExecutorService asyncExecutor = Executors.newFixedThreadPool(2,
+        Thread.ofPlatform().daemon().name("fawe-fabric-async-", 0).factory());
+    private final Map<Integer, ScheduledTask> tasks = new LinkedHashMap<>();
+    private int nextId = 1;
+    private long tick;
+    private volatile boolean stopped;
 
+    /** Binds this manager to the current server and its tick/stop events. */
     public FabricTaskManager(Supplier<MinecraftServer> serverSupplier) {
         this.serverSupplier = serverSupplier;
-        this.mainScheduler = Executors.newSingleThreadScheduledExecutor(new DaemonThreadFactory("fawe-fabric-main"));
-        this.asyncScheduler = Executors.newScheduledThreadPool(2, new DaemonThreadFactory("fawe-fabric-async"));
+        ServerTickEvents.END_SERVER_TICK.register(this::tick);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> shutdown());
     }
 
     @Override
     public int repeat(@Nonnull Runnable runnable, int interval) {
-        long delayMs = Math.max(0, interval) * TICK_MS;
-        int id = nextId.getAndIncrement();
-        ScheduledFuture<?> future = mainScheduler.scheduleAtFixedRate(
-            () -> runOnMain(runnable),
-            delayMs,
-            delayMs,
-            TimeUnit.MILLISECONDS
-        );
-        tasks.put(id, future);
-        return id;
+        return schedule(runnable, Math.max(1, interval), Math.max(1, interval), false);
     }
 
     @Override
     public int repeatAsync(@Nonnull Runnable runnable, int interval) {
-        long delayMs = Math.max(0, interval) * TICK_MS;
-        int id = nextId.getAndIncrement();
-        ScheduledFuture<?> future = asyncScheduler.scheduleAtFixedRate(
-            runnable,
-            delayMs,
-            delayMs,
-            TimeUnit.MILLISECONDS
-        );
-        tasks.put(id, future);
-        return id;
+        return schedule(runnable, Math.max(1, interval), Math.max(1, interval), true);
     }
 
     @Override
     public void async(@Nonnull Runnable runnable) {
-        asyncScheduler.execute(runnable);
+        MinecraftServer server = requireServer();
+        asyncExecutor.execute(() -> {
+            if (requireServer() != server) {
+                throw new RejectedExecutionException("FAWE server changed");
+            }
+            runnable.run();
+        });
     }
 
     @Override
     public void task(@Nonnull Runnable runnable) {
-        runOnMain(runnable);
+        MinecraftServer server = requireServer();
+        server.execute(() -> {
+            if (requireServer() != server) {
+                throw new RejectedExecutionException("FAWE server changed");
+            }
+            runnable.run();
+        });
+    }
+
+    @Override
+    public void taskNowMain(@Nonnull Runnable runnable) {
+        task(runnable);
     }
 
     @Override
     public void later(@Nonnull Runnable runnable, int delay) {
-        long delayMs = Math.max(0, delay) * TICK_MS;
-        int id = nextId.getAndIncrement();
-        ScheduledFuture<?> future = mainScheduler.schedule(() -> runOnMain(runnable), delayMs, TimeUnit.MILLISECONDS);
-        tasks.put(id, future);
+        schedule(runnable, Math.max(1, delay), 0, false);
     }
 
     @Override
     public void laterAsync(@Nonnull Runnable runnable, int delay) {
-        long delayMs = Math.max(0, delay) * TICK_MS;
-        int id = nextId.getAndIncrement();
-        ScheduledFuture<?> future = asyncScheduler.schedule(runnable, delayMs, TimeUnit.MILLISECONDS);
-        tasks.put(id, future);
+        schedule(runnable, Math.max(1, delay), 0, true);
     }
 
     @Override
-    public void cancel(int task) {
-        if (task == -1) {
+    public synchronized void cancel(int id) {
+        ScheduledTask scheduled = tasks.remove(id);
+        if (scheduled != null) {
+            scheduled.cancelled = true;
+        }
+    }
+
+    /** Cancels pending work without waiting for workers on the server thread. */
+    public synchronized void shutdown() {
+        stopped = true;
+        tasks.values().forEach(task -> task.cancelled = true);
+        tasks.clear();
+        asyncExecutor.shutdownNow();
+        getPublicForkJoinPool().shutdownNow();
+    }
+
+    // Never fall back to executing world work on the caller when the server is absent.
+    private MinecraftServer requireServer() {
+        MinecraftServer server = serverSupplier.get();
+        if (stopped || server == null || server.isStopped()) {
+            throw new RejectedExecutionException("FAWE server is unavailable or stopping");
+        }
+        return server;
+    }
+
+    // Admission and shutdown share a lock so no delayed task can survive shutdown.
+    private synchronized int schedule(Runnable runnable, int delay, int interval, boolean async) {
+        requireServer();
+        int id = nextId++;
+        tasks.put(id, new ScheduledTask(runnable, tick + delay, interval, async));
+        return id;
+    }
+
+    // Detach this tick's due list before running callbacks, which may schedule more work.
+    private void tick(MinecraftServer server) {
+        if (stopped || serverSupplier.get() != server) {
             return;
         }
-        ScheduledFuture<?> future = tasks.remove(task);
-        if (future != null) {
-            future.cancel(false);
+        ArrayList<ScheduledTask> due = new ArrayList<>();
+        synchronized (this) {
+            tick++;
+            for (ScheduledTask scheduled : tasks.values()) {
+                if (scheduled.due <= tick && scheduled.running.compareAndSet(false, true)) {
+                    scheduled.due = tick + Math.max(1, scheduled.interval);
+                    due.add(scheduled);
+                }
+            }
+        }
+        for (ScheduledTask scheduled : due) {
+            Runnable run = () -> {
+                try {
+                    if (!scheduled.cancelled && !stopped) {
+                        scheduled.runnable.run();
+                    }
+                } finally {
+                    synchronized (this) {
+                        if (scheduled.interval == 0) {
+                            tasks.values().remove(scheduled);
+                        }
+                        scheduled.running.set(false);
+                    }
+                }
+            };
+            if (scheduled.async) {
+                async(run);
+            } else {
+                run.run();
+            }
         }
     }
 
-    private void runOnMain(Runnable runnable) {
-        MinecraftServer server = serverSupplier.get();
-        if (server != null) {
-            server.execute(runnable);
-        } else {
-            runnable.run();
-        }
-    }
+    // Mutable scheduling state is protected by the manager lock; cancellation crosses worker threads.
+    private static final class ScheduledTask {
+        private final Runnable runnable;
+        private final int interval;
+        private final boolean async;
+        private final AtomicBoolean running = new AtomicBoolean();
+        private long due;
+        private volatile boolean cancelled;
 
-    private static final class DaemonThreadFactory implements ThreadFactory {
-        private final String namePrefix;
-        private final AtomicInteger threadId = new AtomicInteger(1);
-
-        private DaemonThreadFactory(String namePrefix) {
-            this.namePrefix = namePrefix;
-        }
-
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread thread = new Thread(r, namePrefix + "-" + threadId.getAndIncrement());
-            thread.setDaemon(true);
-            return thread;
+        private ScheduledTask(Runnable runnable, long due, int interval, boolean async) {
+            this.runnable = runnable;
+            this.due = due;
+            this.interval = interval;
+            this.async = async;
         }
     }
 }

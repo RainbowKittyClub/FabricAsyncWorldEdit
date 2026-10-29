@@ -21,7 +21,8 @@ package com.sk89q.worldedit.fabric.mixin;
 
 import com.sk89q.worldedit.fabric.FabricWorldEdit;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.spongepowered.asm.mixin.Mixin;
@@ -39,21 +40,23 @@ public class MixinServerGamePacketListenerImpl {
     @Unique
     private int ignoreSwingPackets;
 
-    @Inject(method = "handleAnimate", at = @At("HEAD"))
-    private void onAnimate(ServerboundSwingPacket packet, CallbackInfo ci) {
+    @Inject(method = "handlePunch", at = @At(value = "INVOKE",
+        target = "Lnet/minecraft/server/level/ServerPlayer;swing(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/component/SwingAnimation;Z)Z"))
+    private void onPunch(ServerboundPunchPacket packet, CallbackInfo ci) {
         if (!this.player.gameMode.isDestroyingBlock) {
             if (this.ignoreSwingPackets > 0) {
                 this.ignoreSwingPackets--;
             } else if (FabricWorldEdit.inst != null) {
-                FabricWorldEdit.inst.onLeftClickAir(this.player, packet.getHand());
+                FabricWorldEdit.inst.onLeftClickAir(this.player, InteractionHand.MAIN_HAND);
             }
         }
     }
 
-    @Inject(method = "handlePlayerAction", at = @At("HEAD"))
+    @Inject(method = "handlePlayerAction", at = @At(value = "INVOKE",
+        target = "Lnet/minecraft/server/level/ServerPlayer;resetLastActionTime()V"))
     private void onAction(ServerboundPlayerActionPacket packet, CallbackInfo ci) {
         switch (packet.getAction()) {
-            case DROP_ITEM, DROP_ALL_ITEMS, START_DESTROY_BLOCK -> this.ignoreSwingPackets++;
+            case START_DESTROY_BLOCK -> this.ignoreSwingPackets++;
             default -> {
             }
         }

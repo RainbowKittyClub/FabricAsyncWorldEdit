@@ -3,8 +3,9 @@
   "id": "worldedit-sp-testharness",
   "version": "1.0.0",
   "name": "WorldEdit Singleplayer Test Harness",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
+    "main": ["com.fastasyncworldedit.testharness.TaskLifecycleProbe"],
     "client": [
       "com.fastasyncworldedit.testharness.SpTestHarness"
     ]
