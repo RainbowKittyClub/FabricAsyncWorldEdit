@@ -93,7 +93,8 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     await send('gamerule advance_weather false')
     await send('forceload add 1008 1008 1055 1055')
     await send('fill 1020 79 1020 1040 79 1040 minecraft:stone')
-    client = await startClient(rig, repo, { name, port: game.port })
+    client = await startClient(rig, repo, { name, port: game.port, ...extension?.clientOptions })
+    if (extension?.login) await extension.login(rig, send, client)
     if (fault === 'dead-client') {
       await rig.stop(client.entry)
       await client.send({ action: 'capture' })

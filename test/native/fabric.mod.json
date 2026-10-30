@@ -5,6 +5,7 @@
   "name": "FAWE isolated native probe",
   "environment": "client",
   "license": "GPL-3.0-or-later",
+  "entrypoints": {"main": ["com.fastasyncworldedit.fixture.PaletteFixture"]},
   "mixins": ["fawe-native-probe.mixins.json"],
   "depends": {"minecraft": "26.3", "fabricloader": ">=0.19.5", "java": ">=25"}
 }

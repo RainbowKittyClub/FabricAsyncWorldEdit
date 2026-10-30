@@ -1,0 +1,12 @@
+{
+  "type": "fawe_test:tall",
+  "generator": {
+    "type": "minecraft:flat",
+    "settings": {
+      "biome": "minecraft:plains",
+      "features": false,
+      "lakes": false,
+      "layers": [{"block": "minecraft:bedrock", "height": 1}]
+    }
+  }
+}

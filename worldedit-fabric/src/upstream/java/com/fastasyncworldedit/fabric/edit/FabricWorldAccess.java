@@ -31,13 +31,27 @@ public final class FabricWorldAccess {
             "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace",
             "minecraft:bell", "minecraft:lectern", "minecraft:gold_block", "minecraft:diamond_block");
     private final MinecraftServer server;
-    private final FabricStateMapping mapping;
+    private FabricStateMapping mapping;
+    private boolean mappingValid = true;
 
     /** Bind one loaded registry generation; no live object is handed to detached preparation. */
     public FabricWorldAccess(MinecraftServer server, FabricStateMapping mapping) {
         this.server = server;
         this.mapping = mapping;
         owner();
+    }
+
+    /** Refuse old proposals from the start of reload, including a failed reload. */
+    public void invalidateMapping() {
+        owner();
+        mappingValid = false;
+    }
+
+    /** Install a complete fresh generation after reload has finished. */
+    public void replaceMapping(FabricStateMapping replacement) {
+        owner();
+        mapping = Objects.requireNonNull(replacement);
+        mappingValid = true;
     }
 
     /** Resolve the current dimension only on the owner thread. */
@@ -57,13 +71,25 @@ public final class FabricWorldAccess {
         if (chunk == null) {
             throw new IllegalStateException("Required ticketed chunk is not loaded: " + chunkX + "," + chunkZ);
         }
+        refuseAttachments(chunk);
         return chunk;
+    }
+
+    // Fabric's pinned internal enumeration is required to fail closed for unknown payload owners.
+    static void refuseAttachments(Object target) {
+        if (!(target instanceof net.fabricmc.fabric.impl.attachment.AttachmentTargetImpl attachments)) {
+            throw new UnsupportedOperationException("Attachment enumeration capability is unavailable");
+        }
+        var values = attachments.fabric_getAttachments();
+        if (values != null && !values.isEmpty()) {
+            throw new UnsupportedOperationException("Attachment lifecycle/restore codecs are not installed");
+        }
     }
 
     /** Compare every declared dependency plus every intended before-value immediately before commit. */
     public boolean matches(PreparedChunkEdit proposal, ServerLevel level) {
         owner();
-        if (proposal.registryGeneration() != mapping.generation()) {
+        if (!mappingValid || proposal.registryGeneration() != mapping.generation()) {
             return false;
         }
         for (PreparedChunkEdit.ReadDependency dependency : proposal.reads()) {
@@ -142,6 +168,9 @@ public final class FabricWorldAccess {
             case BLOCK -> {
                 var state = chunk.getBlockState(pos);
                 var blockEntity = chunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+                if (blockEntity != null) {
+                    refuseAttachments(blockEntity);
+                }
                 yield new EditValue(FabricAdapter.adapt(state).getAsString(), blockEntity == null ? null
                         : FrozenNbt.capture(blockEntity.saveWithFullMetadata(level.registryAccess())));
             }

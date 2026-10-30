@@ -5,6 +5,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { DisplayLease } = require('./display')
+const { Rig, memory } = require('./rig')
 
 function fixture (action) {
   const root = fs.mkdtempSync(path.join(process.env.TMPDIR, 'fawe-display-test-'))
@@ -54,6 +55,35 @@ test('lease collisions refuse, startup rechecks, cleanup preserves desktop ident
   const b = new DisplayLease({ ...options, numbers: [200] })
   b.close()
 }))
+
+test('nested displays verify in reverse child shutdown order', async () => {
+  const root = fs.mkdtempSync(path.join(process.env.TMPDIR, 'fawe-display-order-'))
+  fs.mkdirSync(path.join(root, '.X11-unix'))
+  const options = { tempRoot: root, leaseRoot: path.join(root, 'leases'), display: ':0', unix: () => '' }
+  try {
+    fs.writeFileSync(path.join(root, '.X11-unix/X0_'), 'desktop')
+    const first = new DisplayLease({ ...options, numbers: [200] })
+    fs.writeFileSync(first.paths(200)[0], 'first child socket')
+    const second = new DisplayLease({ ...options, numbers: [201] })
+    fs.writeFileSync(second.paths(201)[0], 'second child socket')
+    first.attach({ stopped: false })
+    second.attach({ stopped: false })
+    const rig = { root, children: [first.entry, second.entry], displays: [first, second],
+      ports: [], tempDirs: [], initialMemory: memory(),
+      stop: async entry => {
+        const display = entry === first.entry ? first : second
+        // Simulate each owned Xvfb removing only its own mock socket at exit.
+        fs.unlinkSync(display.paths(display.number)[0])
+        entry.stopped = true
+      } }
+    await Rig.prototype.close.call(rig)
+    assert.equal(first.closed, true)
+    assert.equal(second.closed, true)
+    assert.equal(fs.readFileSync(path.join(root, '.X11-unix/X0_'), 'utf8'), 'desktop')
+    assert.deepEqual(first.before, first.after)
+    assert.deepEqual(second.before, second.after)
+  } finally { fs.rmSync(root, { recursive: true }) }
+})
 
 test('changed desktop entry fails cleanup without repairing it', () => fixture((root, options) => {
   const desktop = path.join(root, '.X11-unix/X0_')

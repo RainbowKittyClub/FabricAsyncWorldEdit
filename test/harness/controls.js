@@ -42,8 +42,8 @@ async function controls (rig, repo) {
 // Two live leases/processes/databases must remain separate, including rejected cross-rig cleanup.
 async function isolation (parent, repo) {
   const manifestFile = path.join(repo, 'test/manifest.json')
-  const a = new Rig('/mnt/WORKSPACE/scratchpad/fawe', parent.manifest, manifestFile)
-  const b = new Rig('/mnt/WORKSPACE/scratchpad/fawe', parent.manifest, manifestFile)
+  const a = new Rig('/mnt/WORKSPACE/scratchpad/fawe', parent.manifest, manifestFile, parent.admission)
+  const b = new Rig('/mnt/WORKSPACE/scratchpad/fawe', parent.manifest, manifestFile, parent.admission)
   const databases = []
   try {
     const [pa, pb] = await Promise.all([a.port(), b.port()])

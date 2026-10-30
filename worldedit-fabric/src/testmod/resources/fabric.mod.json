@@ -5,12 +5,13 @@
   "name": "WorldEdit Singleplayer Test Harness",
   "environment": "*",
   "entrypoints": {
-    "main": ["com.fastasyncworldedit.testharness.TaskLifecycleProbe", "com.fastasyncworldedit.testharness.CommitContractProbe", "com.fastasyncworldedit.testharness.QueueContractProbe"],
+    "main": ["com.fastasyncworldedit.fixture.PaletteFixture", "com.fastasyncworldedit.testharness.TaskLifecycleProbe", "com.fastasyncworldedit.testharness.CommitContractProbe", "com.fastasyncworldedit.testharness.QueueContractProbe", "com.fastasyncworldedit.testharness.PreparationProbe"],
     "fawe:edit_integration": ["com.fastasyncworldedit.testharness.QueueContractProbe"],
     "client": [
       "com.fastasyncworldedit.testharness.SpTestHarness"
     ]
   },
+  "mixins": ["fawe-preparation-probe.mixins.json"],
   "depends": {
     "worldedit": "*"
   }

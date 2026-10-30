@@ -5,6 +5,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
+import com.fastasyncworldedit.fixture.PaletteFixture;
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.spongepowered.asm.mixin.Mixin;
@@ -15,6 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 
 /** File-controlled native renderer probe; never included in the production jar. */
@@ -27,13 +30,17 @@ public abstract class NativeDriverMixin {
     @Inject(method = "runTick", at = @At("TAIL"))
     private void faweTest$frame(boolean advanceGameTime, CallbackInfo ci) throws IOException {
         Minecraft client = (Minecraft) (Object) this;
-        String state = client.gui.overlay() != null ? "loading"
+        String state = client.gui.screen() instanceof DisconnectedScreen ? "disconnected"
+            : client.gui.overlay() != null ? "loading"
             : client.level != null && client.player != null && client.gui.screen() == null ? "world"
             : client.gui.screen() instanceof TitleScreen ? "title" : "screen";
         if (!state.equals(faweTest$lastState)) {
             faweTest$lastState = state;
             JsonObject event = new JsonObject();
             event.addProperty("state", state);
+            if (client.gui.screen() instanceof DisconnectedScreen screen) {
+                event.addProperty("reason", screen.getNarrationMessage().getString());
+            }
             faweTest$event(event);
         }
         Path requestFile = Path.of(System.getProperty("fawe.test.request"));
@@ -49,6 +56,10 @@ public abstract class NativeDriverMixin {
         JsonObject result = new JsonObject();
         result.addProperty("id", id);
         switch (request.get("action").getAsString()) {
+            case "palette-registry" -> {
+                result.add("registry", new Gson().toJsonTree(PaletteFixture.describe()));
+                faweTest$event(result);
+            }
             case "command" -> {
                 if (!state.equals("world")) {
                     throw new IllegalStateException("Command requested without a ready world");

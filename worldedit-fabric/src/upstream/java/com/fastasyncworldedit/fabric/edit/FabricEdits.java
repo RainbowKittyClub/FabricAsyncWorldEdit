@@ -37,10 +37,10 @@ import net.minecraft.server.MinecraftServer;
 public final class FabricEdits {
     private static FabricEdits active;
     private final MinecraftServer server;
-    private final FabricStateMapping mapping;
+    private FabricStateMapping mapping;
     private final FabricWorldAccess access;
     private final FabricCommitCoordinator coordinator;
-    private final ThreadPoolExecutor preparation = executor("fawe-coordinated-preparation");
+    private final FabricPreparationService preparation;
     private final ThreadPoolExecutor recording = executor("fawe-coordinated-recording");
     private final Map<CompletableFuture<List<CommitReceipt>>, EditActorContext> admitted = new java.util.concurrent.ConcurrentHashMap<>();
     private boolean stopped;
@@ -51,11 +51,26 @@ public final class FabricEdits {
         this.server = server;
         mapping = new FabricStateMapping(server);
         access = new FabricWorldAccess(server, mapping);
+        preparation = new FabricPreparationService(server, access);
         coordinator = new FabricCommitCoordinator(server, access, EditIntegrations.discover(), recording, 32, 64L << 20);
     }
 
     /** Register lifecycle hooks once, without enabling the experimental backend by default. */
     public static void initialize() {
+        FabricChunkTickets.register();
+        ServerLifecycleEvents.START_DATA_PACK_RELOAD.register((server, resources) -> {
+            if (active != null && active.server == server) {
+                active.preparation.reload(true);
+                active.access.invalidateMapping();
+            }
+        });
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> {
+            if (active != null && active.server == server) {
+                active.mapping = new FabricStateMapping(server);
+                active.access.replaceMapping(active.mapping);
+                active.preparation.reload(false);
+            }
+        });
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             if (Boolean.getBoolean("fawe.experimental.coordinated")) {
                 active = new FabricEdits(server);
@@ -64,6 +79,7 @@ public final class FabricEdits {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (active != null && active.server == server) {
                 active.coordinator.tick();
+                active.preparation.tick();
             }
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -86,88 +102,120 @@ public final class FabricEdits {
         return active;
     }
 
-    /**
-     * Admit loaded snapshots on the server thread, then invoke normal FAWE queue APIs off-thread.
-     * The callback must not escape its queue. S3 supports at most four loaded chunks, 4096 writes
-     * per submitted chunk, and explicit no-neighbor side effects; cold loads belong to S4.
-     */
+    /** Admit a declared read footprint; callbacks run only after asynchronous loading and snapshots. */
     public CompletionStage<List<CommitReceipt>> submit(EditActorContext context, List<BlockVector2> footprint,
             ChangeSet history, Consumer<SingleThreadQueueExtent> edit) {
+        return submitUnits(context, List.of(new Unit(footprint, edit)), history);
+    }
+
+    /** One detached chunk callback, with all destination and neighbor reads declared in advance. */
+    public record Unit(List<BlockVector2> footprint, Consumer<SingleThreadQueueExtent> edit) {
+        public Unit {
+            footprint = List.copyOf(footprint);
+            Objects.requireNonNull(edit);
+            if (footprint.isEmpty() || footprint.size() > 4
+                    || footprint.stream().distinct().count() != footprint.size()) {
+                throw new IllegalArgumentException("Unit requires one to four distinct read chunks");
+            }
+        }
+    }
+
+    /** Submit bounded independent units; each uses upstream queues and can prepare in parallel. */
+    public CompletionStage<List<CommitReceipt>> submitUnits(EditActorContext context, List<Unit> units,
+            ChangeSet history) {
         owner();
         Objects.requireNonNull(history);
         if (!(history instanceof com.sk89q.worldedit.history.changeset.ArrayListHistory)) {
-            throw new UnsupportedOperationException("S3 requires synchronous in-memory history; durable histories need an acknowledgement adapter");
+            throw new UnsupportedOperationException("Durable histories need an acknowledgement adapter");
         }
-        Objects.requireNonNull(edit);
-        List<BlockVector2> positions = List.copyOf(footprint);
-        if (stopped || admitted.size() >= 8 || positions.isEmpty() || positions.size() > 4
-                || positions.stream().distinct().count() != positions.size()) {
-            throw new IllegalArgumentException("Loaded operation admission is closed, full or outside its footprint budget");
+        List<Unit> requests = List.copyOf(units);
+        if (stopped || admitted.size() >= 8 || requests.isEmpty() || requests.size() > 64) {
+            throw new IllegalArgumentException("Operation admission is closed, full or exceeds 64 units");
         }
-        var level = access.level(context.dimension());
-        Map<BlockVector2, FabricGetBlocks> snapshots = new LinkedHashMap<>();
         var operation = coordinator.admit(context, receipt -> {
             record(history, receipt);
             return CompletableFuture.completedFuture(null);
         });
         CompletableFuture<List<CommitReceipt>> result = new CompletableFuture<>();
         admitted.put(result, context);
-        result.whenComplete((receipts, failure) -> {
-            synchronized (admitted) {
-                admitted.remove(result);
-            }
-        });
+        result.whenComplete((receipts, failure) -> admitted.remove(result));
+        List<CompletableFuture<Void>> producers = new java.util.ArrayList<>();
         try {
-            FabricGetBlocks.Submitter submitter = new FabricGetBlocks.Submitter() {
-                @Override
-                @SuppressWarnings("unchecked")
-                public <T extends Future<T>> T submit(FabricGetBlocks snapshot, IQueueExtent<?> queue,
-                        IChunk chunk, IChunkSet set, Runnable finalizer) {
-                    CoreFuture completed = new CoreFuture();
-                    try {
-                        var post = queue.getPostProcessor();
-                        post.validateCommitCompletion();
-                        IChunkSet processed = queue.getProcessor().prepareCommit(chunk, snapshot, set);
-                        PreparedChunkEdit proposal = FabricBufferEdits.freeze(context, snapshot, snapshots.values(), processed);
-                        coordinator.submitCommit(proposal, receipt -> post.completeCommit(chunk,
-                                snapshot.committedBefore(receipt), appliedSet(receipt)))
-                                .whenComplete((receipt, failure) -> {
-                                    Throwable problem = failure;
-                                    try {
-                                        finalizer.run();
-                                    } catch (Throwable callbackFailure) {
-                                        if (problem == null) {
-                                            problem = callbackFailure;
-                                        } else {
-                                            problem.addSuppressed(callbackFailure);
-                                        }
-                                    }
-                                    if (problem == null) {
-                                        completed.complete(null);
-                                    } else {
-                                        context.cancellation().cancel();
-                                        completed.completeExceptionally(problem);
-                                    }
-                                });
-                    } catch (Throwable failure) {
-                        context.cancellation().cancel();
-                        completed.completeExceptionally(failure);
-                    }
-                    return (T) completed;
-                }
-            };
-            for (BlockVector2 pos : positions) {
-                snapshots.put(pos, FabricGetBlocks.capture(level, pos.x(), pos.z(), mapping, submitter));
+            for (Unit unit : requests) {
+                producers.add(preparation.submit(context, unit.footprint(), mapping,
+                        snapshots -> submitter(context, snapshots),
+                        snapshots -> execute(context, snapshots, unit.edit())).toCompletableFuture());
             }
-            int minY = level.getMinY();
-            int maxY = level.getMaxY();
-            preparation.execute(() -> execute(context, operation, snapshots, minY, maxY, edit, result));
         } catch (Throwable failure) {
             context.cancellation().cancel();
-            operation.seal().whenComplete((receipts, ignored) -> result.completeExceptionally(
-                    new OperationFailure(context, operation.publishedReceipts(), failure)));
+            producers.add(CompletableFuture.failedFuture(failure));
         }
+        CompletableFuture.allOf(producers.toArray(CompletableFuture[]::new)).whenComplete((unused, preparationFailure) ->
+                operation.seal().whenComplete((receipts, failure) -> {
+                    Throwable terminal = preparationFailure == null ? failure : preparationFailure;
+                    if (terminal == null) {
+                        result.complete(receipts);
+                    } else {
+                        result.completeExceptionally(new OperationFailure(context, operation.publishedReceipts(), terminal));
+                    }
+                }));
         return result.minimalCompletionStage();
+    }
+
+    /** Select worker parallelism between drained operations. */
+    public void preparationWorkers(int workers) {
+        owner();
+        if (!admitted.isEmpty()) {
+            throw new IllegalStateException("Drain operations before changing preparation workers");
+        }
+        preparation.workers(workers);
+    }
+
+    /** Observe bounded snapshot, queue and ticket ownership on the server thread. */
+    public Map<String, Long> preparationStatistics() {
+        return preparation.statistics();
+    }
+
+    private FabricGetBlocks.Submitter submitter(EditActorContext context,
+            Map<BlockVector2, FabricGetBlocks> snapshots) {
+        return new FabricGetBlocks.Submitter() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public <T extends Future<T>> T submit(FabricGetBlocks snapshot, IQueueExtent<?> queue,
+                    IChunk chunk, IChunkSet set, Runnable finalizer) {
+                CoreFuture completed = new CoreFuture();
+                try {
+                    var post = queue.getPostProcessor();
+                    post.validateCommitCompletion();
+                    IChunkSet processed = queue.getProcessor().prepareCommit(chunk, snapshot, set);
+                    PreparedChunkEdit proposal = FabricBufferEdits.freeze(context, snapshot, snapshots.values(), processed);
+                    coordinator.submitCommit(proposal, receipt -> post.completeCommit(chunk,
+                            snapshot.committedBefore(receipt), appliedSet(receipt)))
+                            .whenComplete((receipt, failure) -> {
+                                Throwable problem = failure;
+                                try {
+                                    finalizer.run();
+                                } catch (Throwable callbackFailure) {
+                                    if (problem == null) {
+                                        problem = callbackFailure;
+                                    } else {
+                                        problem.addSuppressed(callbackFailure);
+                                    }
+                                }
+                                if (problem == null) {
+                                    completed.complete(null);
+                                } else {
+                                    context.cancellation().cancel();
+                                    completed.completeExceptionally(problem);
+                                }
+                            });
+                } catch (Throwable failure) {
+                    context.cancellation().cancel();
+                    completed.completeExceptionally(failure);
+                }
+                return (T) completed;
+            }
+        };
     }
 
     /** Failed completion retains immutable publication facts, including a failing queue finalizer. */
@@ -205,9 +253,11 @@ public final class FabricEdits {
     }
 
     // This producer never submits another preparation-pool task and waits for it.
-    private void execute(EditActorContext context, FabricCommitCoordinator.Operation operation,
-            Map<BlockVector2, FabricGetBlocks> snapshots, int minY, int maxY,
-            Consumer<SingleThreadQueueExtent> edit, CompletableFuture<List<CommitReceipt>> result) {
+    private void execute(EditActorContext context, Map<BlockVector2, FabricGetBlocks> snapshots,
+            Consumer<SingleThreadQueueExtent> edit) {
+        FabricGetBlocks first = snapshots.values().iterator().next();
+        int minY = first.getMinY();
+        int maxY = first.getMaxY();
         SingleThreadQueueExtent queue = new SingleThreadQueueExtent();
         queue.init(new NullExtent() {
             @Override
@@ -237,15 +287,9 @@ public final class FabricEdits {
                 problem.addSuppressed(failure);
             }
         }
-        Throwable preparationFailure = problem;
-        operation.seal().whenComplete((receipts, failure) -> {
-            Throwable terminal = preparationFailure == null ? failure : preparationFailure;
-            if (terminal == null) {
-                result.complete(receipts);
-            } else {
-                result.completeExceptionally(new OperationFailure(context, operation.publishedReceipts(), terminal));
-            }
-        });
+        if (problem != null) {
+            throw new java.util.concurrent.CompletionException(problem);
+        }
     }
 
     // Record exact before/after values through upstream history without its enqueue-only wrappers.
@@ -293,14 +337,14 @@ public final class FabricEdits {
         CompletableFuture<?>[] producers = admitted.keySet().stream()
                 .map(future -> future.handle((value, failure) -> null)).toArray(CompletableFuture[]::new);
         CompletionStage<Void> publications = coordinator.stop();
-        preparation.shutdown();
+        CompletionStage<Void> preparationDrain = preparation.stop();
         drain = publications.handle((unused, failure) -> failure).thenCombine(
-                CompletableFuture.allOf(producers), (failure, unused) -> failure).thenCompose(failure -> {
+                CompletableFuture.allOf(producers), (failure, unused) -> failure).thenCombine(
+                preparationDrain, (failure, unused) -> failure).thenCompose(failure -> {
                     recording.shutdown();
                     return CompletableFuture.runAsync(() -> {
                         try {
-                            if (!preparation.awaitTermination(10, TimeUnit.SECONDS)
-                                    || !recording.awaitTermination(10, TimeUnit.SECONDS)) {
+                            if (!recording.awaitTermination(10, TimeUnit.SECONDS)) {
                                 throw new IllegalStateException("Coordinated edit executors did not drain");
                             }
                         } catch (InterruptedException interrupted) {

@@ -37,7 +37,7 @@ public class CharFilterBlock extends ChunkFilterBlock {
 
     private int maxLayer;
     private int minLayer;
-    protected CharGetBlocks get;
+    protected IChunkGet get;
     protected IChunkSet set;
     protected char[] getArr;
     @Nullable
@@ -70,7 +70,7 @@ public class CharFilterBlock extends ChunkFilterBlock {
 
     @Override
     public synchronized final ChunkFilterBlock initLayer(IBlocks iget, IChunkSet iset, int layer) {
-        this.get = (CharGetBlocks) iget;
+        this.get = (IChunkGet) iget;
         minLayer = this.get.getMinSectionPosition();
         maxLayer = this.get.getMaxSectionPosition();
         this.layer = layer;
@@ -354,19 +354,19 @@ public class CharFilterBlock extends ChunkFilterBlock {
         }
         if (layer > minLayer) {
             final int newLayer = layer - 1;
-            return states[get.get(newLayer, index + 3840)];
+            return states[getOrdinalAt(newLayer, index + 3840)];
         }
         return BlockTypes.__RESERVED__.getDefaultState();
     }
 
     @Override
     public final BlockState getBlockAbove() {
-        if (y < 16) {
+        if (y < 15) {
             return states[getArr[index + 256]];
         }
         if (layer < maxLayer) {
             final int newLayer = layer + 1;
-            return states[get.get(newLayer, index - 3840)];
+            return states[getOrdinalAt(newLayer, index - 3840)];
         }
         return BlockTypes.__RESERVED__.getDefaultState();
     }
@@ -377,10 +377,10 @@ public class CharFilterBlock extends ChunkFilterBlock {
         final int layerAdd = newY >> 4;
         if (layerAdd == 0) {
             return states[getArr[this.index + (y << 8)]];
-        } else if ((layerAdd > 0 && layerAdd < (maxLayer - layer)) || (layerAdd < 0 && layerAdd < (minLayer - layer))) {
+        } else if (layer + layerAdd >= minLayer && layer + layerAdd <= maxLayer) {
             final int newLayer = layer + layerAdd;
             final int index = (this.index + ((y & 15) << 8)) & 4095;
-            return states[get.get(newLayer, index)];
+            return states[getOrdinalAt(newLayer, index)];
         }
         return BlockTypes.__RESERVED__.getDefaultState();
     }
@@ -391,6 +391,14 @@ public class CharFilterBlock extends ChunkFilterBlock {
     @Override
     public char getOrdinalChar(Extent orDefault) {
         return getOrdinalChar();
+    }
+
+    // Detached adapters expose ordinals through IChunkGet, not CharBlocks' mutable cache.
+    private char getOrdinalAt(int section, int cell) {
+        if (get instanceof CharGetBlocks cached) {
+            return cached.get(section, cell);
+        }
+        return get.getBlock(cell & 15, (section << 4) + (cell >> 8), (cell >> 4) & 15).getOrdinalChar();
     }
 
     //Set delegate

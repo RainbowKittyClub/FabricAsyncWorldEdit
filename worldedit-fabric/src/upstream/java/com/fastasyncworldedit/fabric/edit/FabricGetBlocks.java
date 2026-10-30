@@ -53,7 +53,9 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
     private final Submitter submitter;
 
     // Only capture constructs backing arrays; no caller gets a reference to them.
-    private FabricGetBlocks(LevelChunk chunk, ServerLevel level, FabricStateMapping mapping, Submitter submitter) {
+    private FabricGetBlocks(LevelChunk chunk, ServerLevel level, FabricStateMapping mapping, Submitter submitter,
+            long byteBudget) {
+        FabricWorldAccess.refuseAttachments(chunk);
         chunkX = chunk.getPos().x();
         chunkZ = chunk.getPos().z();
         minY = level.getMinY();
@@ -61,6 +63,10 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
         this.mapping = mapping;
         this.submitter = submitter;
         revision = ((ChunkRevision) chunk).worldedit$editRevision();
+        long retained = level.getSectionsCount() * 20000L + 8192L;
+        if (retained > byteBudget) {
+            throw new IllegalArgumentException("Snapshot arrays exceed admission budget");
+        }
         sections = new char[level.getSectionsCount()][4096];
         biomes = new BiomeType[sections.length][64];
         sky = new byte[sections.length][4096];
@@ -72,7 +78,7 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
                 int y = baseY + (index >> 8);
                 int z = (index >> 4) & 15;
                 BlockPos pos = new BlockPos((chunkX << 4) + x, y, (chunkZ << 4) + z);
-                sections[section][index] = mapping.ordinal(FabricAdapter.adapt(chunk.getBlockState(pos)).getAsString());
+                sections[section][index] = mapping.ordinal(chunk.getBlockState(pos));
                 sky[section][index] = (byte) level.getBrightness(LightLayer.SKY, pos);
                 light[section][index] = (byte) level.getBrightness(LightLayer.BLOCK, pos);
             }
@@ -86,8 +92,17 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
         for (BlockPos pos : chunk.getBlockEntitiesPos()) {
             var entity = chunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
             if (entity != null) {
-                tiles.put(BlockVector3.at(pos.getX() & 15, pos.getY(), pos.getZ() & 15),
-                        FrozenNbt.capture(entity.saveWithFullMetadata(level.registryAccess())));
+                FabricWorldAccess.refuseAttachments(entity);
+                var nbt = entity.saveWithFullMetadata(level.registryAccess());
+                if (nbt.sizeInBytes() > 65536) {
+                    throw new UnsupportedOperationException("Snapshot block entity exceeds 64 KiB");
+                }
+                FrozenNbt frozen = FrozenNbt.capture(nbt);
+                retained += frozen.estimatedBytes() + 128L;
+                if (retained > byteBudget) {
+                    throw new IllegalArgumentException("Snapshot NBT exceeds admission budget");
+                }
+                tiles.put(BlockVector3.at(pos.getX() & 15, pos.getY(), pos.getZ() & 15), frozen);
             }
         }
         blockEntities = Map.copyOf(tiles);
@@ -147,7 +162,20 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
         if (chunk == null) {
             throw new IllegalStateException("Snapshot chunk is not loaded");
         }
-        return new FabricGetBlocks(chunk, level, mapping, submitter);
+        return capture(level, chunkX, chunkZ, mapping, submitter, FabricPreparationService.UNIT_BYTES);
+    }
+
+    /** Capture within an already reserved byte budget; reject oversized payloads before handoff. */
+    public static FabricGetBlocks capture(ServerLevel level, int chunkX, int chunkZ,
+            FabricStateMapping mapping, Submitter submitter, long byteBudget) {
+        if (!level.getServer().isSameThread()) {
+            throw new IllegalStateException("Snapshot capture requires the server thread");
+        }
+        LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (chunk == null) {
+            throw new IllegalStateException("Snapshot chunk is not loaded");
+        }
+        return new FabricGetBlocks(chunk, level, mapping, submitter, byteBudget);
     }
 
     /** Adapter hook carries the explicit operation rather than recovering it from a worker thread. */
@@ -158,8 +186,16 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
                 IChunk chunk, IChunkSet set, Runnable finalizer);
     }
 
+    /** Count dependencies without allocating per-cell values or records. */
+    public synchronized int dependencyCount() {
+        return blockReads.cardinality() + biomeReads.cardinality();
+    }
+
     /** Enumerate all observed cells, including NBT and neighbor snapshots supplied by the caller. */
     public synchronized List<PreparedChunkEdit.ReadDependency> dependencies() {
+        if (dependencyCount() > 32768) {
+            throw new IllegalArgumentException("Read footprint exceeds 32768 cells");
+        }
         List<PreparedChunkEdit.ReadDependency> result = new ArrayList<>();
         for (int index = blockReads.nextSetBit(0); index >= 0; index = blockReads.nextSetBit(index + 1)) {
             int local = index & 4095;

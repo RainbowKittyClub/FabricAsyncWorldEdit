@@ -13,15 +13,17 @@ function classpath (manifest, side) {
 
 function buildDriver (repo, manifest) {
   const output = path.join(repo, 'build/fawe-native-probe')
+  fs.rmSync(output, { recursive: true, force: true })
   fs.mkdirSync(output, { recursive: true })
   tool('javac', ['--release', '25', '-proc:none', '-cp', classpath(manifest, 'client'), '-d', output,
-    path.join(repo, 'worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/NativeDriverMixin.java')])
+    ...['testharness/NativeDriverMixin.java', 'fixture/PaletteFixture.java'].map(file =>
+      path.join(repo, 'worldedit-fabric/src/testmod/java/com/fastasyncworldedit', file))])
   const jar = path.join(repo, 'build/fawe-native-probe.jar')
   tool('jar', ['--create', '--file', jar, '-C', output, '.', '-C', path.join(repo, 'test/native'), '.'])
   return jar
 }
 
-async function display (rig) {
+async function display (rig, suffix = '') {
   if (!process.env.TMPDIR) throw new GateError('TMPDIR required for private X11 authentication', 2)
   const temp = fs.mkdtempSync(path.join(process.env.TMPDIR, 'fawe-native-'))
   fs.chmodSync(temp, 0o700)
@@ -32,10 +34,10 @@ async function display (rig) {
   const lease = new DisplayLease()
   rig.displays.push(lease)
   const number = lease.number
-  writeJson(path.join(rig.root, 'x11-before.json'), { number, entries: lease.before })
+  writeJson(path.join(rig.root, `x11-before${suffix}.json`), { number, entries: lease.before })
   tool('xauth', ['-f', auth, 'add', `:${number}`, '.', cookie])
   lease.beforeSpawn()
-  const entry = rig.spawn('xvfb', 'Xvfb', [`:${number}`, '-screen', '0', '854x480x24',
+  const entry = rig.spawn(`xvfb${suffix}`, 'Xvfb', [`:${number}`, '-screen', '0', '854x480x24',
     '-nolisten', 'tcp', '-auth', auth, '-noreset'])
   lease.attach(entry)
   await rig.wait('owned private display', () => lease.ready(), 15000, [entry])
@@ -61,8 +63,9 @@ async function startClient (rig, repo, options = {}) {
   const driver = buildDriver(repo, rig.manifest)
   writeJson(path.join(rig.root, 'native-driver.json'), { jarSha256: hash(driver),
     sourceSha256: hash(path.join(repo, 'worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/NativeDriverMixin.java')) })
-  const screen = await display(rig)
-  const dir = path.join(rig.root, 'client')
+  const suffix = options.secondary ? '-secondary' : ''
+  const screen = await display(rig, suffix)
+  const dir = path.join(rig.root, `client${suffix}`)
   fs.mkdirSync(path.join(dir, 'mods'), { recursive: true })
   fs.mkdirSync(path.join(dir, 'frames'))
   fs.writeFileSync(path.join(dir, 'options.txt'), [
@@ -71,9 +74,18 @@ async function startClient (rig, repo, options = {}) {
     'narrator:0', 'lang:en_us', ''
   ].join('\n'))
   fs.copyFileSync(driver, path.join(dir, 'mods/fawe-native-probe.jar'))
+  const installed = { driver: { sha256: hash(driver) }, palette: Boolean(options.palette) }
+  if (options.palette) {
+    const api = rig.manifest.availableDependencies['fabric-api']
+    fs.copyFileSync(verify(api), path.join(dir, 'mods/fabric-api.jar'))
+    installed.fabricApi = api
+    installed.paletteSourceSha256 = hash(path.join(repo,
+      'worldedit-fabric/src/testmod/java/com/fastasyncworldedit/fixture/PaletteFixture.java'))
+  }
+  writeJson(path.join(dir, 'installed-mods.json'), installed)
   const request = path.join(dir, 'request.json')
   const events = path.join(dir, 'events.jsonl')
-  const args = ['-Xmx3G', `-Dclaude.scratch=fawe-${rig.manifest.runLabel}-${rig.token}`,
+  const args = ['-Xmx3G', `-Dfawe.test.s4=${Boolean(options.palette)}`, `-Dclaude.scratch=fawe-${rig.manifest.runLabel}-${rig.token}`,
     '--enable-native-access=ALL-UNNAMED', '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED',
     '-XX:StackShadowPages=32', `-Dfawe.test.request=${request}`, `-Dfawe.test.events=${events}`,
     `-Dfawe.test.frames=${path.join(dir, 'frames')}`,
@@ -84,11 +96,14 @@ async function startClient (rig, repo, options = {}) {
     '--assetsDir', rig.manifest.minecraft.assetsRoot, '--assetIndex', rig.manifest.minecraft.assetIndexName,
     '--width', '854', '--height', '480']
   if (options.port) args.push('--quickPlayMultiplayer', `127.0.0.1:${options.port}`)
-  const entry = rig.spawn('native-client', 'java', args, { cwd: dir, env: screen.env })
+  const entry = rig.spawn(`native-client${suffix}`, 'java', args, { cwd: dir, env: screen.env })
   const readEvents = () => {
     if (!fs.existsSync(events)) return []
     const text = fs.readFileSync(events, 'utf8')
-    return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const observed = text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const disconnected = observed.find(item => item.state === 'disconnected')
+    if (disconnected) throw new GateError(`Native client disconnected: ${disconnected.reason}`)
+    return observed
   }
   const send = async action => {
     const id = crypto.randomUUID()

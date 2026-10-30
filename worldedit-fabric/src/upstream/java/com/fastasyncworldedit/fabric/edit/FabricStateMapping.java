@@ -17,6 +17,7 @@ public final class FabricStateMapping {
     private final long generation = GENERATIONS.incrementAndGet();
     private final BlockState[] states = new BlockState[Character.MAX_VALUE + 1];
     private final Map<String, Character> ordinals;
+    private final Map<net.minecraft.world.level.block.state.BlockState, Character> nativeOrdinals;
     private final Map<String, net.minecraft.world.level.block.state.BlockState> nativeStates;
 
     /** Snapshot the loaded registry on its owner thread and verify every roundtrip. */
@@ -25,6 +26,7 @@ public final class FabricStateMapping {
             throw new IllegalStateException("State mapping must be captured on the server thread");
         }
         Map<String, Character> mapped = new HashMap<>();
+        Map<net.minecraft.world.level.block.state.BlockState, Character> nativeMapped = new HashMap<>();
         Map<String, net.minecraft.world.level.block.state.BlockState> natives = new HashMap<>();
         for (Block block : BuiltInRegistries.BLOCK) {
             for (var nativeState : block.getStateDefinition().getPossibleStates()) {
@@ -37,10 +39,12 @@ public final class FabricStateMapping {
                 }
                 states[ordinal] = state;
                 mapped.put(state.getAsString(), (char) ordinal);
+                nativeMapped.put(nativeState, (char) ordinal);
                 natives.put(state.getAsString(), nativeState);
             }
         }
         ordinals = Map.copyOf(mapped);
+        nativeOrdinals = Map.copyOf(nativeMapped);
         nativeStates = Map.copyOf(natives);
     }
 
@@ -54,6 +58,15 @@ public final class FabricStateMapping {
         Character ordinal = ordinals.get(state);
         if (ordinal == null) {
             throw new IllegalArgumentException("Unknown mapped state: " + state);
+        }
+        return ordinal;
+    }
+
+    /** Map an immutable native state without assuming its global palette ID is a FAWE ordinal. */
+    public char ordinal(net.minecraft.world.level.block.state.BlockState state) {
+        Character ordinal = nativeOrdinals.get(state);
+        if (ordinal == null) {
+            throw new IllegalArgumentException("Unmapped native state: " + state);
         }
         return ordinal;
     }

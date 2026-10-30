@@ -259,6 +259,9 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
 
     @Override
     public CompletionStage<Reservation> prepare(PreparedChunkEdit proposal) {
+        if (PreparationProbe.owns(proposal)) {
+            return PreparationProbe.prepare(proposal);
+        }
         require(proposal.context().equals(context), "Production adapter carries the explicit admitted context");
         prepared.incrementAndGet();
         require(!Fawe.isMainThread(), "Preparation is detached");

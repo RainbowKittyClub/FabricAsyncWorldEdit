@@ -39,15 +39,51 @@ function memory () {
   return { available: entries.MemAvailable, swapUsed: entries.SwapTotal - entries.SwapFree }
 }
 
-// Fixed continuation allowance: never learn a larger limit from a retry or manifest.
-const RESOURCE_POLICY = Object.freeze({ maxInitialSwapBytes: 1064960,
+// Admit idle swap once per run; never move that run's baseline after admission.
+const RESOURCE_POLICY = Object.freeze({ admission: 'bounded-idle-samples',
+  sampleCount: 4, sampleIntervalMs: 250, admissionDeadlineMs: 3000,
   minAvailableBytes: 8 * 1024 ** 3, maxSwapGrowthBytes: 0, maxConcurrentLanes: 1 })
 
 function assertResources (current, initial = current) {
-  if (initial.swapUsed > RESOURCE_POLICY.maxInitialSwapBytes ||
-      current.available < RESOURCE_POLICY.minAvailableBytes || current.swapUsed > initial.swapUsed) {
+  if (current.available < RESOURCE_POLICY.minAvailableBytes || current.swapUsed > initial.swapUsed) {
     throw new GateError(`Resource admission refused: ${JSON.stringify({ current, initial, policy: RESOURCE_POLICY })}`, 2)
   }
+}
+
+function admissionSample () {
+  const vm = Object.fromEntries([...fs.readFileSync('/proc/vmstat', 'utf8')
+    .matchAll(/^(pswpin|pswpout) (\d+)$/gm)].map(match => [match[1], Number(match[2])]))
+  const pressure = Object.fromEntries(fs.readFileSync('/proc/pressure/memory', 'utf8').trim().split('\n')
+    .map(line => { const [kind, ...fields] = line.split(' ')
+      return [kind, Object.fromEntries(fields.map(field => { const [key, value] = field.split('='); return [key, Number(value)] }))] }))
+  return { ...memory(), ...vm, pressure }
+}
+
+async function admitResources ({ sample = admissionSample, now = () => performance.now(),
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)), samples = [] } = {}) {
+  const started = now()
+  for (let i = 0; i < RESOURCE_POLICY.sampleCount; i++) {
+    if (i) await wait(RESOURCE_POLICY.sampleIntervalMs)
+    if (now() - started >= RESOURCE_POLICY.admissionDeadlineMs) {
+      throw new GateError('Resource admission sampling deadline exceeded', 2)
+    }
+    const current = sample()
+    samples.push({ elapsedMs: now() - started, ...current })
+    if (now() - started >= RESOURCE_POLICY.admissionDeadlineMs) {
+      throw new GateError('Resource admission sampling deadline exceeded', 2)
+    }
+    assertResources(current)
+    const first = samples[0]
+    const counters = [current.pswpin, current.pswpout, current.pressure?.some?.total, current.pressure?.full?.total]
+    if (counters.some(value => !Number.isFinite(value)) ||
+        ['some', 'full'].some(kind => current.pressure?.[kind]?.avg10 !== 0 ||
+          current.pressure[kind].total !== first.pressure[kind].total) ||
+        current.pswpin !== first.pswpin || current.pswpout !== first.pswpout || current.swapUsed !== first.swapUsed) {
+      throw new GateError(`Resource admission requires idle swap and pressure: ${JSON.stringify(samples)}`, 2)
+    }
+  }
+  return Object.freeze({ initial: Object.freeze({ available: samples.at(-1).available,
+    swapUsed: samples.at(-1).swapUsed }), samples, policy: RESOURCE_POLICY })
 }
 
 // Shared across worktrees and run roots. Stale leases fail closed; never reclaim another run.
@@ -79,13 +115,14 @@ function startTime (pid) {
 }
 
 class Rig {
-  constructor (root, manifest, manifestFile) {
+  constructor (root, manifest, manifestFile, admission) {
     safeRoot(root)
     this.token = crypto.randomUUID()
     this.root = path.join(root, manifest.runLabel, 's1-s2', this.token)
     fs.mkdirSync(this.root, { recursive: true })
     this.manifest = manifest
-    this.initialMemory = memory()
+    this.admission = admission
+    this.initialMemory = admission.initial
     this.children = []
     this.tempDirs = []
     this.displays = []
@@ -97,7 +134,7 @@ class Rig {
       token: this.token, runner: process.pid, startTime: startTime(process.pid), manifest: hash(manifestFile)
     }), { flag: 'wx' })
     writeJson(path.join(this.root, 'manifest.json'), { ...manifest, resourcePolicy: RESOURCE_POLICY,
-      initialResources: this.initialMemory, sourceManifestSha256: hash(manifestFile) })
+      admission, initialResources: this.initialMemory, sourceManifestSha256: hash(manifestFile) })
     writeJson(path.join(this.root, 'resources-start.json'), this.initialMemory)
     this.assertResources()
   }
@@ -197,15 +234,18 @@ class Rig {
 
   async close () {
     const failures = []
-    for (const entry of this.children.toReversed()) {
-      try { await this.stop(entry) } catch (error) { failures.push(error.message) }
-    }
-    for (const display of this.displays) {
+    const releaseDisplay = display => {
       try {
         display.close()
         writeJson(path.join(this.root, `x11-after-${display.number}.json`), display.after)
       } catch (error) { failures.push(error.message) }
     }
+    for (const entry of this.children.toReversed()) {
+      try { await this.stop(entry) } catch (error) { failures.push(error.message) }
+      // Later displays captured earlier ones; verify them before shutting those earlier children down.
+      for (const display of this.displays.filter(display => display.entry === entry)) releaseDisplay(display)
+    }
+    for (const display of this.displays.filter(display => !display.entry)) releaseDisplay(display)
     for (const lease of this.ports) {
       lease.reservation.close()
       if (fs.existsSync(lease.file) && fs.readFileSync(lease.file, 'utf8') === this.token) fs.unlinkSync(lease.file)
@@ -213,7 +253,9 @@ class Rig {
     if (!failures.length) {
       for (const dir of this.tempDirs) fs.rmSync(dir, { recursive: true })
     }
-    writeJson(path.join(this.root, 'resources-end.json'), memory())
+    const finalResources = memory()
+    writeJson(path.join(this.root, 'resources-end.json'), finalResources)
+    try { assertResources(finalResources, this.initialMemory) } catch (error) { failures.push(error.message) }
     if (failures.length) throw new GateError(`Cleanup failed: ${failures.join('; ')}`, 3)
   }
 }
@@ -226,4 +268,4 @@ function tool (command, args, options = {}) {
 }
 
 module.exports = { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool,
-  RESOURCE_POLICY, assertResources, SingleLaneLease, startTime }
+  RESOURCE_POLICY, admitResources, assertResources, SingleLaneLease, startTime }
