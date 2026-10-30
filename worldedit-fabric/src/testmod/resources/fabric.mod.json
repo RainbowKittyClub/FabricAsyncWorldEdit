@@ -5,7 +5,8 @@
   "name": "WorldEdit Singleplayer Test Harness",
   "environment": "*",
   "entrypoints": {
-    "main": ["com.fastasyncworldedit.testharness.TaskLifecycleProbe"],
+    "main": ["com.fastasyncworldedit.testharness.TaskLifecycleProbe", "com.fastasyncworldedit.testharness.CommitContractProbe", "com.fastasyncworldedit.testharness.QueueContractProbe"],
+    "fawe:edit_integration": ["com.fastasyncworldedit.testharness.QueueContractProbe"],
     "client": [
       "com.fastasyncworldedit.testharness.SpTestHarness"
     ]

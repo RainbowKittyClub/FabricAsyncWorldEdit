@@ -100,6 +100,37 @@ public class MultiBatchProcessor implements IBatchProcessor {
         return chunkSet;
     }
 
+    @Override
+    public IChunkSet prepareCommit(IChunk chunk, IChunkGet get, IChunkSet set) {
+        List<IBatchProcessor> ordered = new ArrayList<>(Arrays.asList(processors));
+        ordered.sort(java.util.Comparator.comparing(IBatchProcessor::getScope));
+        for (IBatchProcessor processor : ordered) {
+            if (set == null) {
+                break;
+            }
+            set = processor.prepareCommit(chunk, get, set);
+        }
+        return set;
+    }
+
+    @Override
+    public void validateCommitCompletion() {
+        for (IBatchProcessor processor : processors) {
+            processor.validateCommitCompletion();
+        }
+    }
+
+    @Override
+    public java.util.concurrent.CompletionStage<Void> completeCommit(
+            IChunk chunk, IChunkGet before, IChunkSet applied) {
+        java.util.concurrent.CompletionStage<Void> result = java.util.concurrent.CompletableFuture.completedFuture(null);
+        for (IBatchProcessor processor : processors) {
+            result = result.thenCompose(ignored -> java.util.Objects.requireNonNull(
+                    processor.completeCommit(chunk, before, applied), "Processor completion"));
+        }
+        return result;
+    }
+
     @Nullable
     private IChunkSet processSet(IBatchProcessor processor, IChunk chunk, IChunkGet get, IChunkSet chunkSet) {
         if (processor instanceof Filter) {

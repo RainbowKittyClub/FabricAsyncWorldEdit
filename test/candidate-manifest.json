@@ -1511,8 +1511,8 @@
       ]
     },
     "candidate": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s1-s2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "dc957484852b420b51479b57ace5ed998016ae609a609f0a148c183eeb618c9b",
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s3-s5/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
+      "sha256": "24c03b23789128396cb87a08fcc4bd0f600999df61d0643f771310c9e0adad94",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
@@ -1565,8 +1565,8 @@
       ]
     },
     "lifecycle-probe": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s1-s2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "4afe767e0c81f8cfd7d64fe70d81649827eaa98b54c13e9867732bd28803de99",
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s3-s5/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
+      "sha256": "af17742850675e5c5b476310877773737c51b6832e138648d39fa23ba5abc389",
       "nested": []
     }
   },

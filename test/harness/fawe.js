@@ -4,7 +4,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { parseArgs } = require('node:util')
-const { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool } = require('./rig')
+const { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool,
+  RESOURCE_POLICY, assertResources, SingleLaneLease } = require('./rig')
 const { renderControl } = require('./native')
 const { smoke } = require('./smoke')
 const { controls } = require('./controls')
@@ -24,7 +25,7 @@ function preflight (manifest) {
   safeRoot(values.root)
   if (values.seed && Number(values.seed) !== manifest.seed) throw new GateError('Seed differs from pinned manifest', 3)
   const resources = memory()
-  if (resources.available < 8 * 1024 ** 3 || resources.swapUsed !== 0) throw new GateError('Insufficient unswapped resources', 2)
+  assertResources(resources)
   for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])
   for (const input of [...manifest.minecraft.libraries, ...manifest.loader.libraries]) verify(input)
   for (const [name, input] of Object.entries(manifest.helpers)) {
@@ -55,12 +56,23 @@ async function main () {
   const resources = preflight(manifest)
   if (positionals[0] === 'preflight') {
     console.log(JSON.stringify({ status: 'capabilities-present-not-runtime-tested', resources,
-      manifest: values.manifest, incompleteProfiles: manifest.unavailableProfiles }))
+      resourcePolicy: RESOURCE_POLICY, manifest: values.manifest, incompleteProfiles: manifest.unavailableProfiles }))
     return
   }
   if (positionals[0] !== 'run') throw new GateError('Use preflight or run; compare is not implemented', 2)
-  if (!['render-control', 'smoke', 's1-controls'].includes(values.suite)) throw new GateError(`Required suite not implemented: ${values.suite}`, 2)
-  const rig = new Rig(values.root, manifest, values.manifest)
+  if (!['render-control', 'smoke', 's1-controls', 'contract', 's3'].includes(values.suite)) throw new GateError(`Required suite not implemented: ${values.suite}`, 2)
+  // The controls orchestrator starts only sequential child runners, each holding this lease.
+  const lease = values.suite === 's1-controls' ? null : new SingleLaneLease()
+  let rig
+  try {
+    rig = new Rig(values.root, manifest, values.manifest)
+    await run(rig)
+  } finally {
+    if (!rig || rig.children.every(entry => entry.stopped)) lease?.close()
+  }
+}
+
+async function run (rig) {
   writeJson(path.join(rig.root, 'test-inputs.json'), Object.fromEntries(
     fs.readdirSync(__dirname).filter(file => /\.(js|py)$/.test(file))
       .map(file => [file, hash(path.join(__dirname, file))])))
@@ -68,7 +80,8 @@ async function main () {
   try {
     if (values.suite === 'render-control') await renderControl(rig, repo)
     else if (values.suite === 's1-controls') await controls(rig, repo)
-    else await smoke(rig, repo, values.workspace, values.profile, values.fault)
+    else await smoke(rig, repo, values.workspace, values.profile, values.fault,
+      values.suite === 'contract' ? require('./contract') : values.suite === 's3' ? require('./s3') : undefined)
   } catch (error) { failure = error } finally {
     try { await rig.close() } catch (error) { failure = error }
     for (const entry of rig.children) {
@@ -80,7 +93,8 @@ async function main () {
     const result = { suite: values.suite, profile: values.profile, accepted: false,
       status: failure ? 'failed' : 'passed-subset', exitCode: failure?.code || (failure ? 1 : 0),
       error: failure?.message, results: rig.results, fixtureRoot: rig.root,
-      stagesComplete: [], missing: ['S3-S15 fast backend, integrations and release acceptance'] }
+      stagesComplete: !failure && values.suite === 's3' ? ['S3'] : [],
+      missing: [!failure && values.suite === 's3' ? 'S4-S15 backend, integrations and release acceptance' : 'S3-S15 backend, integrations and release acceptance'] }
     writeJson(path.join(rig.root, 'results.json'), result)
     fs.writeFileSync(path.join(rig.root, 'junit.xml'), `<testsuite name="${xml(values.suite)}" tests="1" failures="${failure ? 1 : 0}"><testcase name="${xml(values.suite)}">${failure ? `<failure>${xml(failure.message)}</failure>` : ''}</testcase></testsuite>\n`)
     console.log(JSON.stringify(result))

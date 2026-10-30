@@ -186,6 +186,7 @@ public class FabricWorldEdit implements ModInitializer {
         CommandRegistrationCallback.EVENT.register(this::registerCommands);
         ServerLifecycleEvents.SERVER_STARTING.register(this::onStartingServer);
         ServerLifecycleEvents.SERVER_STARTED.register(this::onStartServer);
+        com.fastasyncworldedit.fabric.edit.FabricEdits.initialize();
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onStopServer);
         ServerPlayConnectionEvents.DISCONNECT.register(this::onPlayerDisconnect);
         AttackBlockCallback.EVENT.register(this::onLeftClickBlock);
@@ -342,6 +343,14 @@ public class FabricWorldEdit implements ModInitializer {
         WorldEdit.getInstance().getEventBus().post(new PlatformUnreadyEvent(platform));
         if (Fawe.instance() != null) {
             Fawe.instance().onDisable();
+            var queues = Fawe.instance().getQueueHandler();
+            for (Runnable pending : queues.getBlockingExecutor().shutdownNow()) {
+                if (pending instanceof java.util.concurrent.Future<?> future) {
+                    future.cancel(false);
+                }
+            }
+            queues.getForkJoinPoolPrimary().shutdownNow();
+            queues.getForkJoinPoolSecondary().shutdownNow();
         }
     }
 

@@ -6,7 +6,7 @@ const crypto = require('node:crypto')
 const { GateError, writeJson, verify, hash } = require('./rig')
 const { classpath, startClient, offlineUuid } = require('./native')
 
-async function smoke (rig, repo, workspace, profile = 'reference', fault) {
+async function smoke (rig, repo, workspace, profile = 'reference', fault, extension) {
   const { Rcon } = require('./rcon')
   const { readDevServer } = require(path.join(workspace, 'scripts/loadtest/lib/devserver.js'))
   const serverDir = path.join(rig.root, 'server')
@@ -46,7 +46,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault) {
     return answer
   }
   const launch = async suffix => {
-    server = rig.spawn(`server-${suffix}`, 'java', ['-Xmx3G',
+    server = rig.spawn(`server-${suffix}`, 'java', ['-Xmx3G', ...(extension?.jvmArgs || []),
       `-Dfawe.test.lifecycle=${path.join(rig.root, `lifecycle-${suffix}`)}`,
       `-Dclaude.scratch=fawe-${rig.manifest.runLabel}-${rig.token}`, '--enable-native-access=ALL-UNNAMED',
       '-cp', classpath(rig.manifest, 'server'), 'net.fabricmc.loader.impl.launch.knot.KnotServer', 'nogui'],
@@ -150,11 +150,13 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault) {
     await expected(1030, 80, 1024, 'minecraft:chest[facing=north]')
     await expectInventory(1030, 'diamond', 3)
     await send(`op ${name}`)
+    if (extension) await extension.contract(rig, send, name)
     const frame = await client.send({ action: 'capture' })
     if (frame.state !== 'world' || frame.differentPixels < 1000) throw new GateError('Empty native world frame')
     frame.sha256 = hash(frame.image)
     writeJson(path.join(rig.root, 'native-control.json'), frame)
     if (!(await send('save-all flush')).includes('Saved the game')) throw new GateError('Save failed')
+    if (extension?.beforeStop) await extension.beforeStop(rig, send, name)
     await rig.stop(client.entry)
     await send('stop')
     await rig.wait('saved server exit', () => server.child.exitCode !== null, 30000)
@@ -165,6 +167,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault) {
     rcon.close()
     await launch('restart')
     await send('forceload add 1008 1008 1055 1055')
+    if (extension) await extension.restart(rig, send)
     for (const x of [1024, 1025]) for (const z of [1024, 1025]) await expected(x, 80, z, 'minecraft:gold_block')
     await expectInventory(1030, 'diamond', 3)
     await expectInventory(1032, 'diamond', 3)

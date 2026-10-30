@@ -39,6 +39,41 @@ function memory () {
   return { available: entries.MemAvailable, swapUsed: entries.SwapTotal - entries.SwapFree }
 }
 
+// Fixed continuation allowance: never learn a larger limit from a retry or manifest.
+const RESOURCE_POLICY = Object.freeze({ maxInitialSwapBytes: 1064960,
+  minAvailableBytes: 8 * 1024 ** 3, maxSwapGrowthBytes: 0, maxConcurrentLanes: 1 })
+
+function assertResources (current, initial = current) {
+  if (initial.swapUsed > RESOURCE_POLICY.maxInitialSwapBytes ||
+      current.available < RESOURCE_POLICY.minAvailableBytes || current.swapUsed > initial.swapUsed) {
+    throw new GateError(`Resource admission refused: ${JSON.stringify({ current, initial, policy: RESOURCE_POLICY })}`, 2)
+  }
+}
+
+// Shared across worktrees and run roots. Stale leases fail closed; never reclaim another run.
+class SingleLaneLease {
+  constructor (file = '/mnt/WORKSPACE/scratchpad/fawe/.single-lane.json') {
+    this.file = file
+    this.owner = JSON.stringify({ token: crypto.randomUUID(), pid: process.pid, startTime: startTime(process.pid) })
+    try { fs.writeFileSync(file, this.owner, { flag: 'wx', mode: 0o600 }) } catch (error) {
+      if (error.code === 'EEXIST') throw new GateError(`Single lane already leased: ${file}`, 3)
+      throw error
+    }
+    this.identity = fs.lstatSync(file)
+  }
+
+  close () {
+    if (this.closed) return
+    const identity = fs.lstatSync(this.file)
+    if (identity.dev !== this.identity.dev || identity.ino !== this.identity.ino ||
+        fs.readFileSync(this.file, 'utf8') !== this.owner) {
+      throw new GateError('Refused cleanup of replaced lane lease', 3)
+    }
+    fs.unlinkSync(this.file)
+    this.closed = true
+  }
+}
+
 function startTime (pid) {
   try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1).split(' ')[19] } catch { return null }
 }
@@ -53,6 +88,7 @@ class Rig {
     this.initialMemory = memory()
     this.children = []
     this.tempDirs = []
+    this.displays = []
     this.ports = []
     this.results = []
     this.leaseRoot = path.join(root, '.ports')
@@ -60,16 +96,14 @@ class Rig {
     fs.writeFileSync(path.join(this.root, 'owner.json'), JSON.stringify({
       token: this.token, runner: process.pid, startTime: startTime(process.pid), manifest: hash(manifestFile)
     }), { flag: 'wx' })
-    fs.copyFileSync(manifestFile, path.join(this.root, 'manifest.json'))
+    writeJson(path.join(this.root, 'manifest.json'), { ...manifest, resourcePolicy: RESOURCE_POLICY,
+      initialResources: this.initialMemory, sourceManifestSha256: hash(manifestFile) })
     writeJson(path.join(this.root, 'resources-start.json'), this.initialMemory)
     this.assertResources()
   }
 
   assertResources () {
-    const current = memory()
-    if (current.available < 8 * 1024 ** 3 || current.swapUsed > this.initialMemory.swapUsed) {
-      throw new GateError(`Resource admission refused: ${JSON.stringify(current)}`, 2)
-    }
+    assertResources(memory(), this.initialMemory)
   }
 
   spawn (name, command, args, options = {}) {
@@ -148,8 +182,13 @@ class Rig {
       if (entry.child.exitCode === null && entry.child.signalCode === null) {
         if (startTime(entry.pid) !== entry.startTime) throw new GateError(`PID identity changed: ${entry.pid}`, 3)
         entry.child.kill('SIGKILL')
-        await this.wait(`killed process ${entry.pid} exit`,
-          () => entry.child.exitCode !== null || entry.child.signalCode !== null, 5000)
+        const killedDeadline = Date.now() + 5000
+        while (entry.child.exitCode === null && entry.child.signalCode === null && Date.now() < killedDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        if (entry.child.exitCode === null && entry.child.signalCode === null) {
+          throw new GateError(`Owned process did not exit: ${entry.pid}`, 3)
+        }
       }
     }
     entry.stopped = true
@@ -160,6 +199,12 @@ class Rig {
     const failures = []
     for (const entry of this.children.toReversed()) {
       try { await this.stop(entry) } catch (error) { failures.push(error.message) }
+    }
+    for (const display of this.displays) {
+      try {
+        display.close()
+        writeJson(path.join(this.root, `x11-after-${display.number}.json`), display.after)
+      } catch (error) { failures.push(error.message) }
     }
     for (const lease of this.ports) {
       lease.reservation.close()
@@ -180,4 +225,5 @@ function tool (command, args, options = {}) {
   return result.stdout
 }
 
-module.exports = { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool }
+module.exports = { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool,
+  RESOURCE_POLICY, assertResources, SingleLaneLease, startTime }

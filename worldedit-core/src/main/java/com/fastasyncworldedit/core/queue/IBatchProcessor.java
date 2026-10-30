@@ -25,6 +25,29 @@ public interface IBatchProcessor {
      */
     IChunkSet processSet(IChunk chunk, IChunkGet get, IChunkSet set);
 
+    /** Prepare an opt-in coordinated commit without recording speculative history. */
+    default IChunkSet prepareCommit(IChunk chunk, IChunkGet get, IChunkSet set) {
+        if (getScope() == ProcessorScope.READING_BLOCKS) {
+            throw new UnsupportedOperationException("Processor has no committed-delta contract: " + getClass().getName());
+        }
+        return processSet(chunk, get, set);
+    }
+
+    /** Refuse unsupported completion consumers before any mutation. */
+    default void validateCommitCompletion() {
+        throw new UnsupportedOperationException("Processor has no completion contract: " + getClass().getName());
+    }
+
+    /**
+     * Consume only actual committed deltas. Implementations must propagate exceptions and
+     * return a non-null stage covering all their work, not an enqueue acknowledgement.
+     */
+    default java.util.concurrent.CompletionStage<Void> completeCommit(
+            IChunk chunk, IChunkGet before, IChunkSet applied) {
+        throw new UnsupportedOperationException("Processor has no completion contract: " + getClass().getName());
+    }
+
+
     /**
      * Post-process a chunk that has been edited. Set should NOT be modified here, changes will NOT be flushed to the world,
      * but MAY be flushed to history. Defaults to nothing as most Processors will not use it. Post-processors that are not

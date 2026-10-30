@@ -4,6 +4,7 @@ import com.fastasyncworldedit.core.extent.filter.block.ChunkFilterBlock;
 import com.fastasyncworldedit.core.extent.processor.EmptyBatchProcessor;
 import com.fastasyncworldedit.core.extent.processor.heightmap.HeightMapType;
 import com.fastasyncworldedit.core.nbt.FaweCompoundTag;
+import com.fastasyncworldedit.core.queue.CoordinatedChunkGet;
 import com.fastasyncworldedit.core.queue.Filter;
 import com.fastasyncworldedit.core.queue.IChunk;
 import com.fastasyncworldedit.core.queue.IChunkGet;
@@ -1071,6 +1072,10 @@ public class ChunkHolder<T extends Future<T>> implements IQueueChunk<T> {
                 }
             }
             IChunkGet get = getOrCreateGet();
+            if (get instanceof CoordinatedChunkGet coordinated) {
+                return java.util.Objects.requireNonNull(
+                        coordinated.submitCommit(owner, this, set, finalize), "Commit future");
+            }
             try {
                 get.lockCall();
                 trackExtent();
@@ -1087,7 +1092,11 @@ public class ChunkHolder<T extends Future<T>> implements IQueueChunk<T> {
                 } else {
                     finalizer = finalize;
                 }
-                return get.call(extent, set, finalizer);
+                if (iChunkSet == null) {
+                    finalize.run();
+                    return null;
+                }
+                return get.call(owner, iChunkSet, finalizer);
             } finally {
                 get.unlockCall();
                 untrackExtent();

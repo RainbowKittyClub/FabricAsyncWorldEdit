@@ -3,6 +3,8 @@ package com.fastasyncworldedit.testharness;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -85,8 +87,11 @@ public final class TaskLifecycleProbe implements ModInitializer {
     // The caller supplies a fixture-local output prefix, not a production location.
     private static void write(String phase, String result) {
         try {
-            Files.writeString(Path.of(System.getProperty("fawe.test.lifecycle") + "-" + phase + ".json"),
-                "{\"phase\":\"" + phase + "\",\"status\":\"" + result + "\"}\n");
+            Path resultPath = Path.of(System.getProperty("fawe.test.lifecycle") + "-" + phase + ".json");
+            Path pendingPath = resultPath.resolveSibling(resultPath.getFileName() + ".pending");
+            Files.writeString(pendingPath, "{\"phase\":\"" + phase + "\",\"status\":\"" + result + "\"}\n",
+                    StandardOpenOption.CREATE_NEW);
+            Files.move(pendingPath, resultPath, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException failure) {
             throw new IllegalStateException(failure);
         }

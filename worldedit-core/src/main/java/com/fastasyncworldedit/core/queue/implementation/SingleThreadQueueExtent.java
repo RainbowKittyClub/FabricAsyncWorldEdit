@@ -72,6 +72,20 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
     private int exceptionCount = 0;
     private SideEffectSet sideEffectSet = SideEffectSet.defaults();
     private int targetSize = Settings.settings().QUEUE.TARGET_SIZE;
+    private boolean coordinatedCompletion;
+    private RuntimeException completionFailure;
+
+    /** Opt into receipt-aware completion; call after init and before exposing the queue. */
+    public void coordinatedCompletion() {
+        this.coordinatedCompletion = true;
+    }
+
+    // A coordinated queue may require the server for every submission, including a full-queue drain.
+    private void requireDetachedCaller() {
+        if (coordinatedCompletion && Fawe.isMainThread()) {
+            throw new IllegalStateException("Coordinated queue calls require the asynchronous Fabric edit API");
+        }
+    }
 
     public SingleThreadQueueExtent() {
     }
@@ -176,6 +190,8 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
         this.world = null;
         this.faweExceptionReasonsUsed = new boolean[FaweException.Type.values().length];
         this.targetSize = Settings.settings().QUEUE.TARGET_SIZE;
+        this.coordinatedCompletion = false;
+        this.completionFailure = null;
     }
 
     /**
@@ -222,6 +238,7 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
 
     @Override
     public <V extends Future<V>> V submit(IQueueChunk chunk) {
+        requireDetachedCaller();
         this.lastChunk.compareAndExchange(chunk, null);
         final long index = MathMan.pairInt(chunk.getX(), chunk.getZ());
         getChunkLock.lock();
@@ -236,6 +253,17 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
      * Submit without first checking that it has been removed from the chunk map
      */
     private <V extends Future<V>> V submitUnchecked(IQueueChunk chunk) {
+        requireDetachedCaller();
+        if (coordinatedCompletion) {
+            // Never nest a waiting task inside the preparation pool.
+            chunk.invalidateWrapper();
+            try {
+                V result = (V) chunk.call();
+                return result == null ? (V) (Future) Futures.immediateFuture(null) : result;
+            } catch (Throwable failure) {
+                return (V) (Future) java.util.concurrent.CompletableFuture.failedFuture(failure);
+            }
+        }
         if (chunk.isEmpty()) {
             if (chunk instanceof ChunkHolder<?> holder) {
                 long age = holder.initAge();
@@ -269,13 +297,32 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
 
     @Override
     public <V extends Future<V>> V submitTaskUnchecked(Callable<V> callable) {
+        requireDetachedCaller();
+        if (coordinatedCompletion) {
+            Future<?> result;
+            try {
+                result = java.util.concurrent.CompletableFuture.completedFuture(callable.call());
+            } catch (Throwable failure) {
+                result = java.util.concurrent.CompletableFuture.failedFuture(failure);
+            }
+            submissions.add(result);
+            return (V) result;
+        }
         V future = (V) Fawe.instance().getQueueHandler().submitToBlocking(callable);
         submissions.add(future);
         return future;
     }
 
     @Override
-    public synchronized boolean trim(boolean aggressive) {
+    public boolean trim(boolean aggressive) {
+        requireDetachedCaller();
+        synchronized (this) {
+            return trimInternal(aggressive);
+        }
+    }
+
+    // Trimming can drain recursive futures too, so it shares the flush entry guard.
+    private boolean trimInternal(boolean aggressive) {
         cacheGet.trim(aggressive);
         cacheSet.trim(aggressive);
         LOGGER.info("trim");
@@ -318,6 +365,7 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
 
     @Override
     public final IQueueChunk getOrCreateChunk(int x, int z) {
+        requireDetachedCaller();
         final IQueueChunk lastChunk = this.lastChunk.get();
         if (lastChunk != null && lastChunk.getX() == x && lastChunk.getZ() == z) {
             return lastChunk;
@@ -345,7 +393,10 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
                 IQueueChunk toSubmit = chunks.removeFirst();
                 this.lastChunk.compareAndExchange(toSubmit, null);
                 final Future future = submitUnchecked(toSubmit);
-                if (future != null && !future.isDone()) {
+                if (coordinatedCompletion) {
+                    submissions.add(future);
+                    pollSubmissions(targetSize, lowMem);
+                } else if (future != null && !future.isDone()) {
                     pollSubmissions(targetSize, lowMem);
                     submissions.add(future);
                 }
@@ -399,6 +450,38 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
     }
 
     private void pollSubmissions(int targetSize, boolean aggressive) {
+        if (coordinatedCompletion) {
+            requireDetachedCaller();
+            while (submissions.size() > targetSize) {
+                Future<?> first = submissions.peek();
+                Future<?> next = first;
+                try {
+                    while (next != null) {
+                        if (!aggressive && !next.isDone()) {
+                            return; // Retain the root, even when its recursive child is pending.
+                        }
+                        next = (Future<?>) next.get();
+                    }
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while draining coordinated writes", failure);
+                } catch (Exception failure) {
+                    Throwable cause = failure instanceof ExecutionException ? failure.getCause() : failure;
+                    if (completionFailure == null) {
+                        completionFailure = new IllegalStateException("Coordinated queue completion failed", cause);
+                    } else {
+                        completionFailure.addSuppressed(cause);
+                    }
+                }
+                submissions.remove(first);
+            }
+            if (targetSize == 0 && completionFailure != null) {
+                RuntimeException failure = completionFailure;
+                completionFailure = null;
+                throw failure;
+            }
+            return;
+        }
         final int overflow = submissions.size() - targetSize;
         if (aggressive) {
             if (targetSize == 0) {
@@ -478,7 +561,29 @@ public class SingleThreadQueueExtent extends ExtentBatchProcessorHolder implemen
     }
 
     @Override
-    public synchronized void flush() {
+    public void flush() {
+        requireDetachedCaller();
+        synchronized (this) {
+            flushInternal();
+        }
+    }
+
+    // Check owner-thread rejection before acquiring a monitor held by a draining producer.
+    private void flushInternal() {
+        if (coordinatedCompletion) {
+            getChunkLock.lock();
+            try {
+                while (!chunks.isEmpty()) {
+                    IQueueChunk chunk = chunks.removeFirst();
+                    this.lastChunk.compareAndExchange(chunk, null);
+                    submissions.add(submitUnchecked(chunk));
+                }
+            } finally {
+                getChunkLock.unlock();
+            }
+            pollSubmissions(0, true);
+            return;
+        }
         if (!chunks.isEmpty()) {
             getChunkLock.lock();
             if (MemUtil.isMemoryLimited()) {

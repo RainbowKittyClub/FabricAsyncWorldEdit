@@ -1,7 +1,7 @@
 'use strict'
 
 const fs = require('node:fs')
-const os = require('node:os')
+const { DisplayLease } = require('./display')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const { GateError, verify, writeJson, tool, hash } = require('./rig')
@@ -29,13 +29,16 @@ async function display (rig) {
   const auth = path.join(temp, 'Xauthority')
   fs.writeFileSync(auth, '', { mode: 0o600 })
   const cookie = crypto.randomBytes(16).toString('hex')
-  tool('xauth', ['-f', auth, 'add', ':0', '.', cookie])
-  const entry = rig.spawn('xvfb', 'Xvfb', ['-displayfd', '3', '-screen', '0', '854x480x24',
-    '-nolisten', 'tcp', '-auth', auth, '-noreset'], { extraPipe: true })
-  let output = ''
-  entry.child.stdio[3].on('data', data => { output += data })
-  const number = await rig.wait('private display number', () => /^\d+\n/.test(output) && output.trim(), 15000, [entry])
+  const lease = new DisplayLease()
+  rig.displays.push(lease)
+  const number = lease.number
+  writeJson(path.join(rig.root, 'x11-before.json'), { number, entries: lease.before })
   tool('xauth', ['-f', auth, 'add', `:${number}`, '.', cookie])
+  lease.beforeSpawn()
+  const entry = rig.spawn('xvfb', 'Xvfb', [`:${number}`, '-screen', '0', '854x480x24',
+    '-nolisten', 'tcp', '-auth', auth, '-noreset'])
+  lease.attach(entry)
+  await rig.wait('owned private display', () => lease.ready(), 15000, [entry])
   const env = { ...process.env, DISPLAY: `:${number}`, XAUTHORITY: auth, XDG_RUNTIME_DIR: temp,
     SDL_VIDEO_DRIVER: 'x11', LIBGL_ALWAYS_SOFTWARE: '1', ALSOFT_DRIVERS: 'null' }
   delete env.WAYLAND_DISPLAY

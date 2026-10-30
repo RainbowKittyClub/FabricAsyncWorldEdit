@@ -39,6 +39,16 @@ public final class EmptyBatchProcessor implements IBatchProcessor {
         return other;
     }
 
+    @Override
+    public void validateCommitCompletion() {
+    }
+
+    @Override
+    public java.util.concurrent.CompletionStage<Void> completeCommit(
+            IChunk chunk, IChunkGet before, IChunkSet applied) {
+        return CompletableFuture.completedFuture(null);
+    }
+
     private EmptyBatchProcessor() {
     }
 
