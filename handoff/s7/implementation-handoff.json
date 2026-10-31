@@ -4,7 +4,7 @@
   "status": "implemented-pending-fawe-acceptance",
   "accepted": false,
   "completedStages": [],
-  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json pins a polymer profile with the accepted bundle. The combined run against f20e43c1 passed the direct-section success phases (sections=3, fallbackWrites=0, sent=3, relit=3); the manual-attachment and quarantined-chunk refusal records remain pending. Full S7 remains unaccepted.",
+  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json pins a polymer profile with the accepted bundle. The combined run against f20e43c1 passed the direct-section success phases (sections=3, fallbackWrites=0, sent=3, relit=3) and the manual-attachment refusal (same stats, exact REFUSED reason); the quarantined-chunk refusal record remains pending. Full S7 remains unaccepted.",
   "worktree": {
     "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit",
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
@@ -249,6 +249,24 @@
       "cause": "The phase-1 WorldEdit selection persisted, so re-sending //pos1/2 in phase 4 produced 'Position already set.' instead of the expected 'First position set' response.",
       "fix": "Harness-only: skip the repeated position commands in phase 4 or accept both responses. No FAWE change.",
       "followUp": "Repeat phase 4 against the same dist; then add the quarantined-chunk phase."
+    },
+    {
+      "run": "combined-1793485186295",
+      "pinned": "FAWE dist f20e43c1 + testmod fd18d29e + fixture 001a9130",
+      "status": "success + manual-attachment refusal passed; quarantine setup failed",
+      "observation": "routeStats and refusalStats were both sections=3, fallbackWrites=0, sent=3, relit=3. The client log shows the exact REFUSED message with 'Manual chunk attachments require an owner adapter', and the client events repeat the expected mapping, light and holder sequence. Phase 5's bulktest run failed before reaching the quarantine chunk.",
+      "evidence": {
+        "record": "handoff/s7-polymer/combined-1793485186295.json",
+        "recordSha256": "2de33d13de875a041243dcc72baedb3e014d805ef86c5b8f877fbbc4250acbaf",
+        "fixtureRun": "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/67473e98-92d8-4ee8-8bb3-a98102e4355a/run.json",
+        "clientEvents": [
+          "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/67473e98-92d8-4ee8-8bb3-a98102e4355a/polymerone/events.jsonl",
+          "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/67473e98-92d8-4ee8-8bb3-a98102e4355a/polymertwo/events.jsonl"
+        ]
+      },
+      "cause": "bulktest run prepares the origin chunk (200,200) first; phase 4's manual attachment is still there, so the VE participant throws 'Manual chunk attachments require an owner adapter' before the failureChunk at 3360,80,3200 is quarantined.",
+      "fix": "Harness-only: run the quarantine variant in a fresh server/record, or add a fixture command that only quarantines the failure chunk or removes the manual attachment. No FAWE change.",
+      "followUp": "Record the quarantined-chunk refusal separately against the same dist."
     }
   ],
   "buildEvidence": {
@@ -318,17 +336,17 @@
     "Polymer's accepted harness fixes were test-only: white-list=false and re-adding forceload after pendingreload so recorded holder IDs stay valid for the rejoin client.",
     "test/candidate-manifest.json and the test/manifest.json template now have a polymer profile: the FAWE candidate dist, lifecycle-probe testmod, fabric-api 0.162.0+26.3, and the accepted polymer-bundled 0.18.6-fawe-s7.1+26.3 bundle (e5251e9f...). The staged 0.18.5-rkc.4 entry is retained. No client pack artifact is pinned because Polymer auto-host generates and serves the pack at runtime.",
     "Combined success-path run is in flight in the Polymer session's test/bulk harness with white-list=false and -Dfawe.experimental.coordinated=true. Content is oak_log at 3200,80,3200, lit lamp at 3201,80,3200, and birch_log at 3202,80,3200. Phases: set stone, set oak_log (fresh holders), set stripped_oak_log (identity retention). `fawepublish stats` must show sections==3 and fallbackWrites==0, with sent>=3; relit is informational because cells without light sources may legitimately skip relighting. No ERROR or mixin failures are allowed.",
-    "The combined run against dist f20e43c1 passed phases 1-3 with routeStats sections=3, fallbackWrites=0, sent=3, relit=3. Phase 4 timed out before the refusal because the phase-1 selection persisted and /pos1 returned 'Position already set.' instead of 'First position set'. The refusal and quarantined-chunk phases still need a clean record.",
+    "The combined run against dist f20e43c1 passed the success phases and the manual-attachment refusal: routeStats and refusalStats were both sections=3, fallbackWrites=0, sent=3, relit=3, and the exact REFUSED reason was observed. Phase 5's quarantine setup failed because bulktest run prepares the origin chunk while the phase-4 manual attachment is still present. The quarantined-chunk refusal needs a separate fresh run.",
     "Native-driver command packets are parsed verbatim by ServerGamePacketListenerImpl.parseCommand in 26.3: vanilla literals are slash-less (`setblock`), WorldEdit/FAWE registers both `pos1` and `/pos1`, and `fawe-coordinated` is slash-less. Do not send `/setblock` or `/fawe-coordinated` through the native command action.",
     "Fixture note: RedstoneLampBlock has no onPlace override; an unpowered lit lamp schedules its 4-tick extinguish only from neighborChanged, and tick then cycles LIT off. Place the lamp last (or power it) so later adjacent placements do not neighbor-update it. A 14 -> 0 drop between snapshots is vanilla block ticking, not FAWE or Polymer; direct section swaps bypass neighbor updates and do not re-trigger it. `forceLightUpdates` only drives Polymer's forced-light indexing, not the vanilla block tick.",
     "The combined probe is not a full S7 acceptance run; it exercises the direct-section success path, holder lifecycle and identity retention with the installed accepted bundle."
   ],
   "residualGaps": [
     "Full S7 remains unaccepted. The Polymer API part is accepted at a0ce5b32 (bundle e5251e9f...), but FAWE has no native S7 integration suite, no combined S7/earlier-stage regression, and no consumer adapters.",
-    "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route. The combined run against f20e43c1 passed the success phases (sections=3, fallbackWrites=0, sent=3, relit=3), but the manual-attachment refusal and quarantined-chunk records are still pending.",
+    "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route. The combined run against f20e43c1 passed the success phases and the manual-attachment refusal, but the quarantined-chunk record is still pending.",
     "test/candidate-manifest.json now pins the accepted 0.18.6-fawe-s7.1 bundle in a polymer profile, but no FAWE-side harness has executed that profile; S15 still needs the full pinned matrix and native evidence.",
     "VE-without-core is guarded but not natively exercised: polymer-virtual-entity depends only on polymer-common, so core-free VE deployments are valid and holders can exist while the bridge is not discovered. EditIntegrations.directSectionRouteSupported() now forces the ordinary per-cell lifecycle in that topology, so vanilla setBlockState hooks run and holders cannot silently go stale. Any-of discovery (polymer-core OR polymer-virtual-entity) remains future work because the current Map<mod, impl> shape would double-register the same provider id and trip validate().",
-    "A prepare refusal (unsupported attachment/Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write and is now surfaced to the user as REFUSED with the chunk/position and reason. FAWE deliberately does not fall back to the ordinary route in this revision; no untracked writes or retries occur. The combined run has not exercised this case yet.",
+    "A prepare refusal (unsupported attachment/Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write and is now surfaced to the user as REFUSED with the chunk/position and reason. FAWE deliberately does not fall back to the ordinary route in this revision; no untracked writes or retries occur. The manual-attachment class is exercised in the combined run; the quarantined-chunk class is not yet.",
     "If reading an actual after-value throws after a mutation, FAWE's receipt may under-report applied deltas. Polymer's token would still quarantine the chunk, but FAWE's own quarantine set might not learn about the changed chunk from an empty applied list.",
     "No FAWE-side negative-control, ordering, recipient, lighting, disconnect, or unload tests exist for this bridge. The coordinator and test probes were not extended for the Polymer route.",
     "Consumer-owned adapters (chests, portals, portable attachment/history codecs, diagonal walls, Terraform, shaded kalic0re data) remain separate work and are not implemented here.",
@@ -342,7 +360,7 @@
     "Any push, merge, release, deployment, or production use"
   ],
   "nextTasks": [
-    "Review the repeated combined success-path record against dist f20e43c1, then the manual-attachment and quarantined-chunk refusal records; record all three in this handoff.",
+    "Record the quarantined-chunk refusal in a fresh combined run against dist f20e43c1; the success-path and manual-attachment refusal records are complete.",
     "Use the accepted a0ce5b32 API; when a Maven or staged artifact is available, replace the compile-time mirror with the real dependency and re-verify the bridge.",
     "Execute the polymer profile in test/candidate-manifest.json with the accepted bundle and extend the native harness with direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and the VE-without-core route guard.",
     "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
