@@ -307,7 +307,7 @@
     "Any push, merge, release, deployment, or production use"
   ],
   "nextTasks": [
-    "Review the Polymer session's combined success-path record when it lands, then run the refusal case against a dist containing b80fe3d4a and record both in this handoff.",
+    "Review the repeated combined success-path record against dist f20e43c1, then the manual-attachment and quarantined-chunk refusal records; record all three in this handoff.",
     "Use the accepted a0ce5b32 API; when a Maven or staged artifact is available, replace the compile-time mirror with the real dependency and re-verify the bridge.",
     "Execute the polymer profile in test/candidate-manifest.json with the accepted bundle and extend the native harness with direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and the VE-without-core route guard.",
     "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
