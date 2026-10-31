@@ -215,6 +215,11 @@
       "thinJar": "contains the bridge; no eu/pb4/polymer or PolymerBulkEdits entries",
       "testmodJar": "contains no polymer stub or API entries"
     },
+    "profilePreflight": {
+      "command": "node test/harness/fawe.js preflight --manifest test/candidate-manifest.json --profile polymer",
+      "result": "all pinned polymer-profile inputs verified; stopped at the known missing Xvfb prerequisite",
+      "meaning": "The manifest profile resolves and its hashes match. Native execution still requires the test/flake.nix display environment (TMPDIR, VK_DRIVER_FILES, Xvfb, xauth)."
+    },
     "artifacts": [
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
