@@ -10,7 +10,7 @@
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
     "branch": "wf/fawe-fast-editing-20261029-s7",
     "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "head": "bb53179516ff95b31e9fe29c4b0f3beb13856f03",
+    "head": "aa3e8359b71c554cbf8a0a55e01ef91c62c26087",
     "newCommits": [
       {
         "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
@@ -19,17 +19,22 @@
       {
         "head": "bb53179516ff95b31e9fe29c4b0f3beb13856f03",
         "subject": "fix(fabric): surface Polymer fast-route refusals"
+      },
+      {
+        "head": "aa3e8359b71c554cbf8a0a55e01ef91c62c26087",
+        "subject": "fix(fabric): guard direct sections without polymer-core"
       }
     ],
-    "uncommittedAtHandoffWrite": true,
-    "commitNote": "The bridge and handoff were committed in stages: 5851347b9 (initial implementation), bb5317951 (explicit fast-route refusal messages). Metadata-only handoff commits follow.",
+    "uncommittedAtHandoffWrite": false,
+    "commitNote": "Implementation commits are 5851347b9, bb5317951, and aa3e8359b. Handoff-only commits b28c6e908, c7c1b0b6b, and 04157a878 record evidence; this metadata update is the final follow-up commit.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegrations.java",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricCommitCoordinator.java",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java"
     ],
-    "untracked": [
+    "added": [
       "handoff/s7/blocked-handoff.json",
       "handoff/s7/implementation-handoff.json",
       "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
