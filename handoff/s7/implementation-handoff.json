@@ -84,6 +84,7 @@
     "fixtureRevalidation": {
       "runtime": "handoff/s7-polymer/runtime-1793484952292.json",
       "sha256": "296ba974b805585f5278da14425a8b2b933d6c8d354aeeeb02fd69041af18b8d",
+      "fixtureSha256": "001a91309fa0a136365bd315d83cc6ab641eed76ec5a798366c1a30608105752",
       "status": "passed-subset",
       "scope": "Polymer API proof after the additive manualattach fixture command; not full S7 or S12"
     },
