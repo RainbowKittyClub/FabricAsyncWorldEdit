@@ -338,7 +338,7 @@
   "notClaimed": [
     "S7 completion or acceptance",
     "Maven publication, release approval, or deployment of the Polymer candidate",
-    "Runtime behavior of the FAWE Polymer route on a native server/client",
+    "Full S7 runtime acceptance beyond the recorded combined subset (consumer adapters, S12 visuals, full regression matrix)",
     "Any push, merge, release, deployment, or production use"
   ],
   "nextTasks": [
