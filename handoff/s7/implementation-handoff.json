@@ -212,7 +212,8 @@
       "userFacing": "Coordinated edit REFUSED for chunk X,Z; no changes were written: Polymer direct-section route refused for chunk X,Z at x,y,z; the chunk has an unsupported attachment or Immersive Portals and no writes were made: <reason>",
       "polymerReason": "Manual chunk attachments require an owner adapter (or Bulk publication with Immersive Portals is not supported)",
       "writeState": "no writes; Token.fail observes mutated=false, so this prepare failure does not quarantine the chunk",
-      "statsExpectation": "sections and fallbackWrites unchanged from the baseline"
+      "statsExpectation": "sections and fallbackWrites unchanged from the baseline",
+      "verifiedBy": "handoff/s7-polymer/combined-1793485186295.json; exact REFUSED line observed and both stats unchanged"
     },
     {
       "topology": "reserved, quarantined or unloaded chunk",
@@ -220,7 +221,8 @@
       "userFacing": "Coordinated edit REFUSED for chunk X,Z; no changes were written: Polymer direct-section route refused for chunk X,Z at x,y,z; the chunk is reserved/quarantined or no longer loaded, no writes were made, and unload/reload may be required: <reason>",
       "polymerReason": "Chunk already reserved or quarantined",
       "writeState": "no writes; unload/reload may be required",
-      "statsExpectation": "sections and fallbackWrites unchanged from the baseline"
+      "statsExpectation": "sections and fallbackWrites unchanged from the baseline",
+      "verifiedBy": "pending separate fresh-server run"
     }
   ],
   "combinedFindings": [
