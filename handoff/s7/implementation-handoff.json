@@ -4,7 +4,7 @@
   "status": "implemented-pending-fawe-acceptance",
   "accepted": false,
   "completedStages": [],
-  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json pins a polymer profile with the accepted bundle. The combined run against f20e43c1 passed the direct-section success phases (sections=3, fallbackWrites=0, sent=3, relit=3) and both refusal classes (manual attachment and quarantined chunk) with the exact REFUSED reasons and unchanged stats; a clean final record is pending only on a corrected harness assertion. Full S7 remains unaccepted.",
+  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json pins a polymer profile with the accepted bundle. The clean combined record passed-subset: direct-section success (sections=3, fallbackWrites=0, sent=3, relit=3), both refusal classes with the exact REFUSED reasons, and unchanged stats. Full S7 remains unaccepted.",
   "worktree": {
     "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit",
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
@@ -213,7 +213,7 @@
       "polymerReason": "Manual chunk attachments require an owner adapter (or Bulk publication with Immersive Portals is not supported)",
       "writeState": "no writes; Token.fail observes mutated=false, so this prepare failure does not quarantine the chunk",
       "statsExpectation": "sections and fallbackWrites unchanged from the baseline",
-      "verifiedBy": "handoff/s7-polymer/combined-1793485186295.json; exact REFUSED line observed and both stats unchanged"
+      "verifiedBy": "handoff/s7-polymer/combined-1793485390079.json; exact REFUSED line observed and both stats unchanged"
     },
     {
       "topology": "reserved, quarantined or unloaded chunk",
@@ -222,7 +222,7 @@
       "polymerReason": "Chunk already reserved or quarantined",
       "writeState": "no writes; unload/reload may be required",
       "statsExpectation": "sections and fallbackWrites unchanged from the baseline",
-      "verifiedBy": "handoff/s7-polymer/combined-1793485317778.json; exact REFUSED line observed, clean record pending on an unrelated harness assertion"
+      "verifiedBy": "handoff/s7-polymer/combined-1793485390079.json; exact REFUSED line observed and both stats unchanged"
     }
   ],
   "combinedFindings": [
@@ -289,6 +289,45 @@
       "followUp": "Rerun the same final script for a clean record."
     }
   ],
+  "combinedGate": {
+    "status": "passed-subset",
+    "accepted": false,
+    "scope": "FAWE direct-section success path plus manual-attachment and quarantined-chunk refusals; not full S7 or S12",
+    "record": "handoff/s7-polymer/combined-1793485390079.json",
+    "recordSha256": "6099e3e076d00f0ef807c25c9fd9bdf0c037b90a3cb72f9caea92f5ee73393ef",
+    "artifacts": {
+      "faweDistSha256": "f20e43c1f6c8db0041632bd67de0d9542f2956e3c69611705c2e27142e15aefd",
+      "faweTestmodSha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba",
+      "polymerBundleSha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838",
+      "fixtureSha256": "001a91309fa0a136365bd315d83cc6ab641eed76ec5a798366c1a30608105752"
+    },
+    "routeStats": {
+      "sections": 3,
+      "fallbackWrites": 0,
+      "sent": 3,
+      "relit": 3
+    },
+    "quarantineStats": {
+      "sections": 3,
+      "fallbackWrites": 0,
+      "sent": 3,
+      "relit": 3
+    },
+    "refusalStats": {
+      "sections": 3,
+      "fallbackWrites": 0,
+      "sent": 3,
+      "relit": 3
+    },
+    "observations": "Both clients saw red_wool/blue_wool at light 14 with displays [3,4], stone at light 0 with no displays, oak_log with fresh displays [5,6,7], and stripped_oak_log retaining [5,6,7].",
+    "refusals": [
+      "chunk 210,200: Chunk already reserved or quarantined",
+      "chunk 200,200: Manual chunk attachments require an owner adapter"
+    ],
+    "logErrors": 0,
+    "leaseReleased": true,
+    "notClaimed": "Full S7 or S12 acceptance; consumer-owned adapters and the full S15 matrix remain separate."
+  },
   "buildEvidence": {
     "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar :worldedit-fabric:test",
     "latestResult": "BUILD SUCCESSFUL in 11s after extending the lifecycle allowlist for the combined S7 content; :test remains NO-SOURCE",
@@ -356,7 +395,7 @@
     "Polymer's accepted harness fixes were test-only: white-list=false and re-adding forceload after pendingreload so recorded holder IDs stay valid for the rejoin client.",
     "test/candidate-manifest.json and the test/manifest.json template now have a polymer profile: the FAWE candidate dist, lifecycle-probe testmod, fabric-api 0.162.0+26.3, and the accepted polymer-bundled 0.18.6-fawe-s7.1+26.3 bundle (e5251e9f...). The staged 0.18.5-rkc.4 entry is retained. No client pack artifact is pinned because Polymer auto-host generates and serves the pack at runtime.",
     "Combined success-path run is in flight in the Polymer session's test/bulk harness with white-list=false and -Dfawe.experimental.coordinated=true. Content is oak_log at 3200,80,3200, lit lamp at 3201,80,3200, and birch_log at 3202,80,3200. Phases: set stone, set oak_log (fresh holders), set stripped_oak_log (identity retention). `fawepublish stats` must show sections==3 and fallbackWrites==0, with sent>=3; relit is informational because cells without light sources may legitimately skip relighting. No ERROR or mixin failures are allowed.",
-    "The combined run against dist f20e43c1 observed the success phases plus both refusal classes: the manual-attachment and quarantined-chunk REFUSED lines matched exactly, and routeStats/quarantineStats were 3/0. The last record failed only on a stale 3200 block assertion; the harness corrected it to stripped_oak_log, so a clean rerun is pending.",
+    "The clean combined record passed-subset at handoff/s7-polymer/combined-1793485390079.json: success path plus manual-attachment and quarantined-chunk refusals, route/refusal stats 3/0, zero log errors, lease released. This is combined-subset evidence, not full S7 acceptance.",
     "Native-driver command packets are parsed verbatim by ServerGamePacketListenerImpl.parseCommand in 26.3: vanilla literals are slash-less (`setblock`), WorldEdit/FAWE registers both `pos1` and `/pos1`, and `fawe-coordinated` is slash-less. Do not send `/setblock` or `/fawe-coordinated` through the native command action.",
     "Fixture note: RedstoneLampBlock has no onPlace override; an unpowered lit lamp schedules its 4-tick extinguish only from neighborChanged, and tick then cycles LIT off. Place the lamp last (or power it) so later adjacent placements do not neighbor-update it. A 14 -> 0 drop between snapshots is vanilla block ticking, not FAWE or Polymer; direct section swaps bypass neighbor updates and do not re-trigger it. `forceLightUpdates` only drives Polymer's forced-light indexing, not the vanilla block tick.",
     "Combined fixture ordering: run `bulktest run` (quarantine setup) before `bulktest manualattach`, because `run()` prepares the origin chunk and will refuse on a manual attachment. After `run()`, the origin cell 3200,80,3200 is `stripped_oak_log` (not `oak_log`); phase-4 world checks must expect that state.",
@@ -364,7 +403,7 @@
   ],
   "residualGaps": [
     "Full S7 remains unaccepted. The Polymer API part is accepted at a0ce5b32 (bundle e5251e9f...), but FAWE has no native S7 integration suite, no combined S7/earlier-stage regression, and no consumer adapters.",
-    "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route. The combined run against f20e43c1 observed the success phases and both refusal classes with exact messages, but a clean final record is still pending on a corrected harness assertion.",
+    "A FAWE-side native S7 integration suite did not run in this environment, which lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE. The Polymer-session combined record passed-subset at combined-1793485390079, covering the direct-section success path and both refusal classes; full S7 still needs consumer adapters, S12 visual acceptance and the full regression matrix.",
     "test/candidate-manifest.json now pins the accepted 0.18.6-fawe-s7.1 bundle in a polymer profile, but no FAWE-side harness has executed that profile; S15 still needs the full pinned matrix and native evidence.",
     "VE-without-core is guarded but not natively exercised: polymer-virtual-entity depends only on polymer-common, so core-free VE deployments are valid and holders can exist while the bridge is not discovered. EditIntegrations.directSectionRouteSupported() now forces the ordinary per-cell lifecycle in that topology, so vanilla setBlockState hooks run and holders cannot silently go stale. Any-of discovery (polymer-core OR polymer-virtual-entity) remains future work because the current Map<mod, impl> shape would double-register the same provider id and trip validate().",
     "A prepare refusal (unsupported attachment/Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write and is now surfaced to the user as REFUSED with the chunk/position and reason. FAWE deliberately does not fall back to the ordinary route in this revision; no untracked writes or retries occur. The manual-attachment class is exercised in the combined run; the quarantined-chunk class is not yet.",
@@ -381,7 +420,7 @@
     "Any push, merge, release, deployment, or production use"
   ],
   "nextTasks": [
-    "Rerun the final combined script with the corrected 3200 stripped_oak_log assertion for a clean record covering the success path plus both refusal classes.",
+    "Retain combined-1793485390079 as the S7 combined-subset evidence, then proceed with consumer-owned adapters, S12 visual acceptance and the earlier-stage regression matrix.",
     "Use the accepted a0ce5b32 API; when a Maven or staged artifact is available, replace the compile-time mirror with the real dependency and re-verify the bridge.",
     "Execute the polymer profile in test/candidate-manifest.json with the accepted bundle and extend the native harness with direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and the VE-without-core route guard.",
     "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
