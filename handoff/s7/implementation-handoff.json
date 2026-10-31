@@ -10,7 +10,7 @@
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
     "branch": "wf/fawe-fast-editing-20261029-s7",
     "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "head": "bf97d55e5131e8857e481c583d704ef29a3f9986",
+    "head": "daf1a43b18f28322f6c660cd36e54a4bd64771b6",
     "newCommits": [
       {
         "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
@@ -35,10 +35,14 @@
       {
         "head": "bf97d55e5131e8857e481c583d704ef29a3f9986",
         "subject": "test(manifest): pin accepted Polymer bundle profile"
+      },
+      {
+        "head": "daf1a43b18f28322f6c660cd36e54a4bd64771b6",
+        "subject": "test(manifest): keep polymer template unavailable until pinned"
       }
     ],
     "uncommittedAtHandoffWrite": false,
-    "commitNote": "Implementation commits are 5851347b9, bb5317951, aa3e8359b, dd1ad010e, b80fe3d4a, and bf97d55e5. Handoff-only commits b28c6e908, c7c1b0b6b, 04157a878, 709a63adb, 562bf6169, a1cf55daa, and 7c4ffe442 record evidence; this metadata update is the final follow-up commit.",
+    "commitNote": "Implementation commits are 5851347b9, bb5317951, aa3e8359b, dd1ad010e, b80fe3d4a, bf97d55e5, and daf1a43b1. Handoff-only commits b28c6e908, c7c1b0b6b, 04157a878, 709a63adb, 562bf6169, a1cf55daa, 7c4ffe442, bcd43688c, and cc3f55fa9 record evidence; this metadata update is the final follow-up commit.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
@@ -47,6 +51,7 @@
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricRegionCommands.java",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java",
       "worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/PublicationProbe.java",
+      "test/harness/pin-candidate.py",
       "test/manifest.json",
       "test/candidate-manifest.json"
     ],
