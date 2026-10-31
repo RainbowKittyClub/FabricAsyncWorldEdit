@@ -155,6 +155,9 @@ public final class PublicationProbe implements ModInitializer {
         String[] words = args.split(" ");
         ServerLevel level = server.overworld();
         switch (words[0]) {
+            case "stats" -> {
+                return new Gson().toJson(FabricEdits.get(server).publicationStatistics());
+            }
             case "fixture" -> {
                 require(current == null || current.future == null || current.future.isDone(), "Previous operation active");
                 current = new Run(nextChunk, words[1]);

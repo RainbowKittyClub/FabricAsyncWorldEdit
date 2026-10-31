@@ -32,7 +32,8 @@
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegrations.java",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricCommitCoordinator.java",
-      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java"
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java",
+      "worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/PublicationProbe.java"
     ],
     "added": [
       "handoff/s7/blocked-handoff.json",
@@ -127,6 +128,12 @@
       "summary": "Added directSectionRouteSupported(): whole-section publication is disabled when polymer-virtual-entity is installed without polymer-core, because holders can exist while the bridge is not discovered. The guard forces the ordinary per-cell lifecycle, which still runs vanilla setBlockState hooks."
     },
     {
+      "file": "worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/PublicationProbe.java",
+      "state": "modified",
+      "sha256": "e4edd3c6493a7abfb27c9b762f6dadab77c26fe1704880a3cb2e86bb2bfc6e25",
+      "summary": "Added `fawepublish stats`, returning FabricEdits.publicationStatistics() as JSON. The combined S7 probe uses it to prove the direct-section route ran (sections incremented, fallbackWrites unchanged) instead of inferring the route from world state."
+    },
+    {
       "file": "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
       "state": "new",
       "sha256": "3e15bad9181ae53c14e689d4d69a1d27f1a0751617a486fff116e52769363e57",
@@ -161,7 +168,7 @@
   ],
   "buildEvidence": {
     "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar",
-    "latestResult": "BUILD SUCCESSFUL in 11s after adding the VE-without-core route guard; :test remains NO-SOURCE",
+    "latestResult": "BUILD SUCCESSFUL in 8s after adding `fawepublish stats` to the testmod; :test remains NO-SOURCE",
     "unitTests": "NO-SOURCE",
     "warnings": "13 pre-existing deprecation/removal warnings; none from the changed Polymer/route files",
     "log": "/tmp/opencode/fawe-s7-build3.log",
@@ -188,21 +195,23 @@
     "artifacts": [
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-        "sha256": "c2f15cf94939fe0aff3ef42b56dd3d012f273c5039360f55941908368b1bd712"
+        "sha256": "1d1f57b067328a8712fe2dbdfb2f4945afe0388144e6c7a973d1e246a799c22e"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT.jar",
-        "sha256": "975262357be48f28eb488a664622c7a86fc22a7923074beddbd4a06894fc3d67"
+        "sha256": "8409d03d5e7cbd08cb5f3a0506fe8a161cceb4b7d2574081964642a48e83765d"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-        "sha256": "1fd7b1530d13409113a97ee94b4bd768efdb822a0856a9ec833d3add09b35dc1"
+        "sha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba"
       }
     ]
   },
   "harnessNotes": [
     "Minecraft 26.3 dedicated servers default white-list=true; non-op test clients must run with white-list=false (FAWE S6 smoke already sets this).",
-    "Polymer's accepted harness fixes were test-only: white-list=false and re-adding forceload after pendingreload so recorded holder IDs stay valid for the rejoin client."
+    "Polymer's accepted harness fixes were test-only: white-list=false and re-adding forceload after pendingreload so recorded holder IDs stay valid for the rejoin client.",
+    "Combined S7 probe plan: install the FAWE dist + testmod + fabric-api alongside the accepted Polymer bundle, launch with -Dfawe.experimental.coordinated=true, place oak_log via setblock, and run /fawe-coordinated set minecraft:air on a 1x1x1 selection. A reconciled bridge detaches the VE holder and the client display disappears; a bypassed bridge leaves the display attached. Re-place oak_log and set stripped_oak_log to assert holder identity retention. `fawepublish stats` must show sections +1 with fallbackWrites unchanged.",
+    "The combined probe is not a full S7 acceptance run; it exercises one direct-section edit and one identity-retention edit with the installed bundle."
   ],
   "residualGaps": [
     "Full S7 remains unaccepted. The Polymer API part is accepted at a0ce5b32 (bundle e5251e9f...), but FAWE has no native S7 integration suite, no combined S7/earlier-stage regression, and no consumer adapters.",
