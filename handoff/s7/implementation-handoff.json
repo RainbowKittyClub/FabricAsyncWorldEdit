@@ -301,6 +301,7 @@
     "scope": "FAWE direct-section success path plus manual-attachment and quarantined-chunk refusals; not full S7 or S12",
     "record": "handoff/s7-polymer/combined-1793485390079.json",
     "recordSha256": "6099e3e076d00f0ef807c25c9fd9bdf0c037b90a3cb72f9caea92f5ee73393ef",
+    "root": "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/da1b603a-e309-44cd-b1a3-aed0c619f571",
     "artifacts": {
       "faweDistSha256": "f20e43c1f6c8db0041632bd67de0d9542f2956e3c69611705c2e27142e15aefd",
       "faweTestmodSha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba",
