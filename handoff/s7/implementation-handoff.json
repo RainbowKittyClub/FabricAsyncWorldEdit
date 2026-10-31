@@ -4,7 +4,7 @@
   "status": "implemented-pending-fawe-acceptance",
   "accepted": false,
   "completedStages": [],
-  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json now pins a polymer profile with the accepted bundle. A combined success-path run is in flight in the Polymer session's harness; no native FAWE S7 integration suite has completed, so full S7 remains unaccepted.",
+  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API, added an explicit direct-section route discriminator, and made prepare refusals surface as explicit REFUSED results that name the chunk/position and reason. The Fabric module compiles and packages, the bridge compiles against the exact polymer-common jar nested in the accepted bundle, and test/candidate-manifest.json pins a polymer profile with the accepted bundle. The first combined FAWE+Polymer run failed before write because the lifecycle allowlist omitted the S7 fixture's content states; 6d23ad364 fixes that, and the success/refusal runs must be repeated. Full S7 remains unaccepted.",
   "worktree": {
     "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit",
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
