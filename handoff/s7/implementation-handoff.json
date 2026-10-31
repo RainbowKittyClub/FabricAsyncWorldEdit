@@ -233,7 +233,7 @@
       "observation": "The first fawe-coordinated set stone reported 'Coordinated edit failed after 0 recorded changes: OperationFailure' and the world stayed unchanged.",
       "cause": "FabricWorldAccess.SUPPORTED_BLOCKS omitted the S7 fixture's birch_log, stripped_oak_log and redstone_lamp states, so validatePayloads threw 'No lifecycle capability for ...' before any write.",
       "fix": "6d23ad364 adds the fixture's vanilla content states (plus acacia_log and jungle_log) to the allowlist. Payload, block-entity and direct-section eligibility checks are unchanged.",
-      "followUp": "Re-run the combined success path against dist f20e43c1, which also contains b80fe3d4a's REFUSED wording."
+      "followUp": "Resolved by 6d23ad364 and the subsequent combined runs."
     },
     {
       "run": "combined-1793485030160",
@@ -250,7 +250,7 @@
       },
       "cause": "The phase-1 WorldEdit selection persisted, so re-sending //pos1/2 in phase 4 produced 'Position already set.' instead of the expected 'First position set' response.",
       "fix": "Harness-only: skip the repeated position commands in phase 4 or accept both responses. No FAWE change.",
-      "followUp": "Repeat phase 4 against the same dist; then add the quarantined-chunk phase."
+      "followUp": "Resolved by combined-1793485390079 after the selection-reuse fix."
     },
     {
       "run": "combined-1793485186295",
@@ -268,7 +268,7 @@
       },
       "cause": "bulktest run prepares the origin chunk (200,200) first; phase 4's manual attachment is still there, so the VE participant throws 'Manual chunk attachments require an owner adapter' before the failureChunk at 3360,80,3200 is quarantined.",
       "fix": "Harness-only: run the quarantine variant in a fresh server/record, or add a fixture command that only quarantines the failure chunk or removes the manual attachment. No FAWE change.",
-      "followUp": "Record the quarantined-chunk refusal separately against the same dist."
+      "followUp": "Resolved by combined-1793485390079 after reordering bulktest run before manualattach."
     },
     {
       "run": "combined-1793485317778",
@@ -286,7 +286,7 @@
       },
       "cause": "The run launched before the corrected 3200 assertion landed; bulktest run leaves that cell as stripped_oak_log.",
       "fix": "Harness-only: assert stripped_oak_log at 3200. No FAWE change.",
-      "followUp": "Rerun the same final script for a clean record."
+      "followUp": "Resolved by combined-1793485390079 with the corrected stripped_oak_log assertion."
     }
   ],
   "combinedGate": {
