@@ -1798,13 +1798,14 @@
     ]
   },
   "unavailableProfiles": [
+    "audit",
+    "backend-db",
     "base",
     "claims",
-    "audit",
     "full",
-    "vanilla-light",
-    "backend-db",
-    "paper"
+    "paper",
+    "polymer",
+    "vanilla-light"
   ],
   "unresolved": [
     "Bridge-specific permissions/audit consumers and profile suites belong to S6-S14",

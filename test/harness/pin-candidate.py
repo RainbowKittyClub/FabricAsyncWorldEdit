@@ -23,7 +23,9 @@ for key, suffix in [('candidate', 'dist'), ('lifecycle-probe', 'testmod')]:
     manifest['availableDependencies'][key] = {
         'path': str(jar), 'sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'nested': nested}
 manifest['profiles']['base'] = ['candidate', 'fabric-api', 'lifecycle-probe']
-manifest['unavailableProfiles'].remove('base')
+for profile in ('base', 'polymer'):
+    if profile in manifest['unavailableProfiles']:
+        manifest['unavailableProfiles'].remove(profile)
 (root / 'test/candidate-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: manifest['availableDependencies'][key]
                   for key in ['candidate', 'lifecycle-probe']}, indent=2))
