@@ -237,7 +237,15 @@
       "run": "combined-1793485030160",
       "pinned": "FAWE dist f20e43c1 + testmod fd18d29e + fixture 001a9130",
       "status": "success-phases-passed; harness timeout in phase 4",
-      "observation": "Phases 1-3 passed all assertions. routeStats were sections=3, fallbackWrites=0, sent=3, relit=3. Phase 4 timed out before the refusal because /pos1 returned 'Position already set.'",
+      "observation": "Phases 1-3 passed all assertions. Both clients saw red_wool/blue_wool at light 14 with displays [3,4], then stone at light 0 with no displays, then oak_log with fresh displays [5,6,7], then stripped_oak_log retaining [5,6,7]. routeStats were sections=3, fallbackWrites=0, sent=3, relit=3. Phase 4 timed out before the refusal because /pos1 returned 'Position already set.'",
+      "evidence": {
+        "record": "handoff/s7-polymer/combined-1793485030160.json",
+        "recordSha256": "4dc24a1ff6e2c4e206e28fcf4e3943f56b393f04b30623f000acc821c519398b",
+        "clientEvents": [
+          "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/c020ecd9-d6d8-4dff-8675-f8df99e326fa/polymerone/events.jsonl",
+          "/mnt/WORKSPACE/scratchpad/fawe/fawe-s7-combined/s1-s2/c020ecd9-d6d8-4dff-8675-f8df99e326fa/polymertwo/events.jsonl"
+        ]
+      },
       "cause": "The phase-1 WorldEdit selection persisted, so re-sending //pos1/2 in phase 4 produced 'Position already set.' instead of the expected 'First position set' response.",
       "fix": "Harness-only: skip the repeated position commands in phase 4 or accept both responses. No FAWE change.",
       "followUp": "Repeat phase 4 against the same dist; then add the quarantined-chunk phase."
