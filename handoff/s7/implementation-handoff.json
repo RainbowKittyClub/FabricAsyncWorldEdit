@@ -85,8 +85,8 @@
     {
       "install": "polymer-common only",
       "bridge": "not loaded",
-      "status": "supported absence",
-      "reason": "polymer-common alone provides no PolymerBlock mappings and no BlockWithElementHolder API, so no Polymer state or holders can exist to reconcile. The bridge's absence is correct, not a gap."
+      "status": "explicitly unsupported install; safe absence",
+      "reason": "The bundle is the only supported install for this stage. A common-only deployment contains no PolymerBlock mappings (core) and no BlockWithElementHolder API (VE), so no Polymer state or holders can exist and a token would have nothing to reconcile. The bridge's absence is therefore safe, not a reconciliation gap."
     },
     {
       "install": "polymer-virtual-entity + polymer-common, no polymer-core",
