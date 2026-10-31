@@ -85,6 +85,12 @@
       "runtime": "handoff/s7-polymer/runtime-1793484952292.json",
       "sha256": "296ba974b805585f5278da14425a8b2b933d6c8d354aeeeb02fd69041af18b8d",
       "fixtureSha256": "001a91309fa0a136365bd315d83cc6ab641eed76ec5a798366c1a30608105752",
+      "root": "/mnt/WORKSPACE/scratchpad/fawe/polymer-s7-api/s1-s2/8a609b1c-91c6-4528-b436-c2f533b664f4",
+      "serverAssertions": 75,
+      "focusedAssertions": 62,
+      "rejoinIdMatch": "[29, 30, 31, 32, 33, 34]",
+      "logErrors": 0,
+      "leaseReleased": true,
       "status": "passed-subset",
       "scope": "Polymer API proof after the additive manualattach fixture command; not full S7 or S12"
     },
