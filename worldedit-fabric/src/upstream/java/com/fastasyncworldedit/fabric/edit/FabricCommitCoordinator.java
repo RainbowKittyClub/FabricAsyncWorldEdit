@@ -17,6 +17,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
 import com.fastasyncworldedit.fabric.compat.EditIntegration;
+import com.fastasyncworldedit.fabric.compat.EditIntegrations;
 
 /** Bounded, owner-thread publication with explicit receipts and nonblocking finalization. */
 public final class FabricCommitCoordinator {
@@ -39,7 +40,7 @@ public final class FabricCommitCoordinator {
         this.server = Objects.requireNonNull(server);
         this.access = Objects.requireNonNull(access);
         this.integrations = List.copyOf(integrations);
-        com.fastasyncworldedit.fabric.compat.EditIntegrations.validate(this.integrations);
+        EditIntegrations.validate(this.integrations);
         this.detachedExecutor = Objects.requireNonNull(detachedExecutor);
         if (maxPending < 1 || maxBytes < 1) {
             throw new IllegalArgumentException("Commit budgets must be positive");
@@ -376,6 +377,7 @@ public final class FabricCommitCoordinator {
                     }
                     List<EditDelta> finalAuthorized = List.copyOf(authorized);
                     boolean directSections = !unit.nativeMutation
+                            && EditIntegrations.directSectionRouteSupported()
                             && access.directSectionEligible(level, finalAuthorized);
                     if (directSections) {
                         for (EditIntegration.Reservation reservation : unit.reservations) {

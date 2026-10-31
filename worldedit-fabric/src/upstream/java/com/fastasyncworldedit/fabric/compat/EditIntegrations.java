@@ -19,6 +19,19 @@ public final class EditIntegrations {
     private EditIntegrations() {
     }
 
+    /**
+     * Whether whole-section publication may bypass vanilla block-change hooks.
+     *
+     * <p>Polymer Virtual Entity depends only on polymer-common, so a core-free install can own
+     * block-bound holders while the bridge is not discovered (discovery keys on polymer-core).
+     * The direct-section route skips {@code LevelChunk.setBlockState}, so writing it in that
+     * topology would leave holders stale. Force the ordinary per-cell lifecycle instead.</p>
+     */
+    public static boolean directSectionRouteSupported() {
+        FabricLoader loader = FabricLoader.getInstance();
+        return !loader.isModLoaded("polymer-virtual-entity") || loader.isModLoaded("polymer-core");
+    }
+
     /** Load only providers for installed mods; initialization failure is never absence. */
     public static List<EditIntegration> discover() {
         List<EditIntegration> result = new ArrayList<>();

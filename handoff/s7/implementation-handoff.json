@@ -48,6 +48,7 @@
     "polymerAcceptance": "accepted",
     "acceptanceScope": "Polymer bulk-edit API proof, not full S7 or S12",
     "acceptanceAccounting": "handoff/s7-polymer/acceptance-accounting.json",
+    "acceptanceAccountingSha256": "c730fbc63b72b1ce0275d0ed74754a04b26da53eb7c7b27ccd57cdb5bab59716",
     "acceptanceRuntime": "handoff/s7-polymer/runtime-1793480857132.json",
     "acceptanceResult": "passed-subset; 0 log errors; lease released; two native 26.3 clients (pack + no-pack) each received 512/512 palette states, block light 14, chunk-with-light before new display spawn, retained IDs stable, disconnect/unload/rejoin/restart green",
     "bundle": {
@@ -55,6 +56,7 @@
       "sha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838"
     },
     "contract": "handoff/s7-polymer/api-contract.json",
+    "contractSha256": "d10748795cc9d5e2ba3464486bc099846ca82b6790001eaa12c09097cdf15cda",
     "contractStatus": "accepted; public surface unchanged from the candidate contract",
     "polymerHandoff": "handoff/s7-polymer/implementation-handoff.json",
     "polymerHandoffStatus": "stale-failed-snapshot; superseded by acceptance-accounting.json",
@@ -68,6 +70,26 @@
     "sourceHashMatchesRecordedArchive": true,
     "recordedApiSourceSha256": "2418fc8b3200a7cd23f7fb76b255291f82373864b0682227e84fc89911b238ce"
   },
+  "discoveryTopology": [
+    {
+      "install": "bundled (polymer-core + polymer-common + polymer-virtual-entity)",
+      "bridge": "loaded",
+      "status": "supported",
+      "reason": "isModLoaded(\"polymer-core\") is true; common is on core's runtime classpath; core and VE participants are present."
+    },
+    {
+      "install": "polymer-common only",
+      "bridge": "not loaded",
+      "status": "supported absence",
+      "reason": "polymer-common alone provides no PolymerBlock mappings and no BlockWithElementHolder API, so no Polymer state or holders can exist to reconcile. The bridge's absence is correct, not a gap."
+    },
+    {
+      "install": "polymer-virtual-entity + polymer-common, no polymer-core",
+      "bridge": "not loaded",
+      "status": "guarded; ordinary per-cell route forced",
+      "reason": "VE depends only on common, so core-free VE deployments are valid and holders can exist. EditIntegrations.directSectionRouteSupported() returns false in this topology, so FabricCommitCoordinator disables whole-section publication and every cell goes through the ordinary lifecycle path (vanilla setBlockState hooks run). The bridge stays fail-closed, but holders cannot silently go stale. Any-of discovery (polymer-core OR polymer-virtual-entity) remains future work; the current Map<mod, impl> shape would double-register the same provider id and trip validate()."
+    }
+  ],
   "sourceChanges": [
     {
       "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/polymer/PolymerEditBridge.java",
@@ -90,8 +112,14 @@
     {
       "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricCommitCoordinator.java",
       "state": "modified",
-      "sha256": "8eca0aa60eade739db0132d508956cdeccca50e5bd24bcb36a29a870a43c0286",
-      "summary": "Computes the direct-section route after authorization, requires every reservation to allow it, passes the route to beforePublication, and passes it to writeUnit. Native/WNA mutations never enter the direct-section route or acquire a Polymer token."
+      "sha256": "ec4f4998ae325df84e7ab857d1fe4ee0429b82b1fe5ffd1596c8f7b2ebd30f9c",
+      "summary": "Computes the direct-section route after authorization, requires EditIntegrations.directSectionRouteSupported() (VE-without-core guard), requires every reservation to allow it, passes the route to beforePublication, and passes it to writeUnit. Native/WNA mutations never enter the direct-section route or acquire a Polymer token."
+    },
+    {
+      "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegrations.java",
+      "state": "modified",
+      "sha256": "78150d68709d00d2f13754d5da6fbe0be29b415bacf17ffc8b6422e502776151",
+      "summary": "Added directSectionRouteSupported(): whole-section publication is disabled when polymer-virtual-entity is installed without polymer-core, because holders can exist while the bridge is not discovered. The guard forces the ordinary per-cell lifecycle, which still runs vanilla setBlockState hooks."
     },
     {
       "file": "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
@@ -108,7 +136,8 @@
   ],
   "routeSemantics": [
     "Preparation remains detached and performs no live chunk or Polymer API access.",
-    "The coordinator authorizes every delta, then computes directSectionEligible over the whole final authorized set.",
+    "The coordinator authorizes every delta, then checks the static route-support guard and computes directSectionEligible over the whole final authorized set.",
+    "The static guard disables the direct-section route when polymer-virtual-entity is installed without polymer-core, because holders can exist while the bridge is not discovered; ordinary per-cell writes still run the vanilla lifecycle hooks.",
     "If eligible, every reservation is consulted through allowsDirectSections; any false veto forces the ordinary per-cell route for the entire proposal.",
     "The direct route acquires the Polymer token in beforePublication, replaces whole sections without calling LevelChunk.setBlockState, and does not mix ordinary or native writes while the token is live.",
     "A prepare refusal (unsupported attachment, Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write with an explicit no-writes message. The operation is not retried and the coordinator never switches routes mid-publication; unload/reload is required when the chunk is quarantined or no longer the loaded instance.",
@@ -127,10 +156,10 @@
   ],
   "buildEvidence": {
     "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar",
-    "latestResult": "BUILD SUCCESSFUL in 8s after the refusal-message change; the earlier full command including :worldedit-fabric:test also passed with test NO-SOURCE",
+    "latestResult": "BUILD SUCCESSFUL in 11s after adding the VE-without-core route guard; :test remains NO-SOURCE",
     "unitTests": "NO-SOURCE",
     "warnings": "13 pre-existing deprecation/removal warnings; none from the changed Polymer/route files",
-    "log": "/tmp/opencode/fawe-s7-build2.log",
+    "log": "/tmp/opencode/fawe-s7-build3.log",
     "realJarCompile": {
       "command": "javac -cp <accepted bundle META-INF/jars/polymer-common-...jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-accepted-compile2 PolymerEditBridge.java",
       "result": "ACCEPTED-BUNDLE COMPILE OK (refusal messages)",
@@ -154,11 +183,11 @@
     "artifacts": [
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-        "sha256": "bb7b2d1f35556fce81ae8fbc639f410853b8fc3a702813597cd8ac2b64a4bb92"
+        "sha256": "c2f15cf94939fe0aff3ef42b56dd3d012f273c5039360f55941908368b1bd712"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT.jar",
-        "sha256": "f87d4de44cedf308215f1ae54ef644b6e28835a5c9c369429f66a97d61ae51c0"
+        "sha256": "975262357be48f28eb488a664622c7a86fc22a7923074beddbd4a06894fc3d67"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
@@ -174,7 +203,7 @@
     "Full S7 remains unaccepted. The Polymer API part is accepted at a0ce5b32 (bundle e5251e9f...), but FAWE has no native S7 integration suite, no combined S7/earlier-stage regression, and no consumer adapters.",
     "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route.",
     "test/candidate-manifest.json still stages polymer-bundled 0.18.5-rkc.4, not the accepted 0.18.6-fawe-s7.1 bundle, so the existing native harness would not test this API even if its display prerequisites were available.",
-    "Standalone polymer-common without polymer-core is unsupported: isModLoaded(\"polymer-core\") is false, so EditIntegrations keeps the bridge fail-closed. The accepted bundled distribution nests common and core as sibling jars, so the intended install loads the bridge.",
+    "VE-without-core is guarded but not natively exercised: polymer-virtual-entity depends only on polymer-common, so core-free VE deployments are valid and holders can exist while the bridge is not discovered. EditIntegrations.directSectionRouteSupported() now forces the ordinary per-cell lifecycle in that topology, so vanilla setBlockState hooks run and holders cannot silently go stale. Any-of discovery (polymer-core OR polymer-virtual-entity) remains future work because the current Map<mod, impl> shape would double-register the same provider id and trip validate().",
     "A prepare refusal (unsupported attachment/Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write with an explicit no-writes/reload message. FAWE deliberately does not fall back to the ordinary route in this revision; no untracked writes or retries occur.",
     "If reading an actual after-value throws after a mutation, FAWE's receipt may under-report applied deltas. Polymer's token would still quarantine the chunk, but FAWE's own quarantine set might not learn about the changed chunk from an empty applied list.",
     "No FAWE-side negative-control, ordering, recipient, lighting, disconnect, or unload tests exist for this bridge. The coordinator and test probes were not extended for the Polymer route.",
@@ -190,7 +219,7 @@
   ],
   "nextTasks": [
     "Use the accepted a0ce5b32 API; when a Maven or staged artifact is available, replace the compile-time mirror with the real dependency and re-verify the bridge.",
-    "Extend the native harness with the accepted polymer-bundled 0.18.6-fawe-s7.1 profile and direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and standalone-common discovery.",
+    "Extend the native harness with the accepted polymer-bundled 0.18.6-fawe-s7.1 profile and direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and the VE-without-core route guard.",
     "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
     "Implement consumer-owned adapters in their own repositories, then run combined S7 and earlier-stage regressions and S12 consumer/visual acceptance."
   ]
