@@ -52,8 +52,33 @@ public interface EditIntegration {
         public boolean authorize(ServerLevel level, ServerPlayer operator, EditActorContext context,
                 EditDelta actualDelta);
 
-        /** Owner-thread prepublication scope, including deferred watcher publication if needed. */
-        public void beforePublication(ServerLevel level, List<EditDelta> authorized);
+        /**
+         * Owner-thread prepublication scope, including deferred watcher publication if needed.
+         * Providers that only care about the route-aware hook may leave this empty.
+         */
+        public default void beforePublication(ServerLevel level, List<EditDelta> authorized) {
+        }
+
+        /**
+         * Owner-thread veto for whole-section publication, after authorization and before
+         * {@link #beforePublication(ServerLevel, List, boolean)}. Returning false forces the
+         * ordinary per-cell route for every unit in this proposal. Implementations must not
+         * mutate the world or acquire a live-world token here.
+         */
+        public default boolean allowsDirectSections(ServerLevel level, List<EditDelta> authorized) {
+            return true;
+        }
+
+        /**
+         * Route-aware prepublication scope. {@code directSections} is true only when every
+         * authorized delta will be published by replacing whole sections and no ordinary cell
+         * write will occur in this proposal. Providers that only need the legacy hook keep
+         * their existing two-argument implementation.
+         */
+        public default void beforePublication(ServerLevel level, List<EditDelta> authorized,
+                boolean directSections) {
+            beforePublication(level, authorized);
+        }
 
         /**
          * Reconcile actual effects on the owner thread, including partial failures.

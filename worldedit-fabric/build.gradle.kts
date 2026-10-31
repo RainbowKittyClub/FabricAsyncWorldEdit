@@ -40,6 +40,14 @@ sourceSets {
     }
 }
 
+// Polymer's candidate bulk-edit API is not published yet. Compile the bridge against a
+// signature mirror; the real classes are supplied at runtime by polymer-common. The mirror
+// is a separate source set and is never packaged or placed on the runtime classpath.
+val polymerApiStub by sourceSets.creating {
+    java.setSrcDirs(listOf("src/polymerstub/java"))
+    compileClasspath += sourceSets["main"].compileClasspath
+}
+
 loom {
     mods {
         create("worldedit") { sourceSet(sourceSets["main"]) }
@@ -103,6 +111,11 @@ dependencies {
     "compileOnly"(libs.opac) { isTransitive = false }
     "compileOnly"(libs.fabric.permissions.api)
     "compileOnly"(libs.errorprone.annotations)
+    "compileOnly"(files(polymerApiStub.java.destinationDirectory))
+}
+
+tasks.named<JavaCompile>("compileJava") {
+    dependsOn(polymerApiStub.classesTaskName)
 }
 
 configure<BasePluginExtension> {

@@ -208,6 +208,36 @@ public final class FabricWorldAccess {
         };
     }
 
+    /**
+     * Owner-thread route check for whole-section publication. A proposal is eligible only when
+     * every delta is a simple block, no cell has a block entity on either side, and every touched
+     * section currently contains only minecraft-namespace blocks. Mixed or lifecycle-heavy
+     * proposals use the ordinary per-cell route instead.
+     */
+    public boolean directSectionEligible(ServerLevel level, List<EditDelta> deltas) {
+        owner();
+        if (deltas.isEmpty()) return false;
+        LevelChunk chunk = null;
+        Set<Integer> checked = new HashSet<>();
+        for (EditDelta delta : deltas) {
+            if (delta.kind() != EditDelta.Kind.BLOCK) return false;
+            if (mapping.nativeState(delta.before().id()).hasBlockEntity()
+                    || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+                return false;
+            }
+            if (chunk == null) {
+                chunk = loadedChunk(level, delta.x() >> 4, delta.z() >> 4);
+            } else if (delta.x() >> 4 != chunk.getPos().x() || delta.z() >> 4 != chunk.getPos().z()) {
+                return false;
+            }
+            int sectionY = delta.y() >> 4;
+            if (!checked.add(sectionY)) continue;
+            var section = chunk.getSection(chunk.getSectionIndex(delta.y()));
+            if (section.maybeHas(state -> !minecraftNamespace(state))) return false;
+        }
+        return true;
+    }
+
     /** Partition simple cells into section installs and lifecycle-heavy writes into single-cell units. */
     public List<List<EditDelta>> publicationUnits(List<EditDelta> deltas) {
         owner();
@@ -226,30 +256,38 @@ public final class FabricWorldAccess {
         return List.copyOf(units);
     }
 
-    /** Publish a prevalidated unit; receipt capture belongs in the caller's finally block. */
-    public void writeUnit(ServerLevel level, List<EditDelta> deltas, SideEffectSet effects) {
+    /**
+     * Publish a prevalidated unit; receipt capture belongs in the caller's finally block.
+     *
+     * @param directSections true only when {@link #directSectionEligible} approved the proposal.
+     *        The strict path refuses to silently switch routes while a provider holds
+     *        section-scoped state; false writes every cell through the ordinary lifecycle path.
+     */
+    public void writeUnit(ServerLevel level, List<EditDelta> deltas, SideEffectSet effects,
+            boolean directSections) {
         owner();
         if (deltas.isEmpty()) return;
         EditDelta first = deltas.getFirst();
-        if (first.kind() == EditDelta.Kind.BLOCK
-                && !mapping.nativeState(first.before().id()).hasBlockEntity()
-                && !mapping.nativeState(first.after().id()).hasBlockEntity()) {
+        if (directSections) {
+            for (EditDelta delta : deltas) {
+                if (delta.kind() != EditDelta.Kind.BLOCK
+                        || mapping.nativeState(delta.before().id()).hasBlockEntity()
+                        || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+                    throw new IllegalStateException("Direct-section route received a lifecycle cell");
+                }
+            }
             LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
             var section = chunk.getSection(chunk.getSectionIndex(first.y()));
-            if (section.maybeHas(state -> !BuiltInRegistries.BLOCK.getKey(state.getBlock())
-                    .getNamespace().equals("minecraft"))) {
-                for (EditDelta delta : deltas) {
-                    write(level, delta, effects);
-                    fallbackWrites++;
-                }
-            } else {
-                FabricSectionPublication.install(level, chunk, deltas, mapping);
-                installedSections++;
+            if (section.maybeHas(state -> !minecraftNamespace(state))) {
+                throw new IllegalStateException("Direct-section route lost section eligibility");
             }
+            FabricSectionPublication.install(level, chunk, deltas, mapping);
+            installedSections++;
         } else {
-            if (deltas.size() != 1) throw new IllegalArgumentException("Lifecycle fallback is one cell");
-            write(level, first, effects);
-            fallbackWrites++;
+            for (EditDelta delta : deltas) {
+                write(level, delta, effects);
+                fallbackWrites++;
+            }
         }
     }
 
@@ -382,6 +420,10 @@ public final class FabricWorldAccess {
             }
             default -> throw new UnsupportedOperationException("No writer registered for " + delta.kind());
         }
+    }
+
+    private static boolean minecraftNamespace(net.minecraft.world.level.block.state.BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("minecraft");
     }
 
     // Workers may only use detached snapshots; even a loaded live read is forbidden.

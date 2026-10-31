@@ -374,8 +374,16 @@ public final class FabricCommitCoordinator {
                             denied++;
                         }
                     }
+                    List<EditDelta> finalAuthorized = List.copyOf(authorized);
+                    boolean directSections = !unit.nativeMutation
+                            && access.directSectionEligible(level, finalAuthorized);
+                    if (directSections) {
+                        for (EditIntegration.Reservation reservation : unit.reservations) {
+                            directSections &= reservation.allowsDirectSections(level, finalAuthorized);
+                        }
+                    }
                     for (EditIntegration.Reservation reservation : unit.reservations) {
-                        reservation.beforePublication(level, List.copyOf(authorized));
+                        reservation.beforePublication(level, finalAuthorized, directSections);
                     }
                     if (!access.matches(proposal, level)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
@@ -398,7 +406,8 @@ public final class FabricCommitCoordinator {
                         }
                         try {
                             if (!unit.nativeMutation) {
-                                access.writeUnit(level, permitted, proposal.context().sideEffects());
+                                access.writeUnit(level, permitted, proposal.context().sideEffects(),
+                                        directSections);
                             } else if (!permitted.isEmpty()) {
                                 access.writeNative(level, permitted.getFirst(), proposal.context().sideEffects());
                             }

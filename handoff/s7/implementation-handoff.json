@@ -1,0 +1,161 @@
+{
+  "stage": "S7",
+  "run": "fawe-fast-editing-20261029-autonomous",
+  "status": "implemented-unaccepted",
+  "accepted": false,
+  "completedStages": [],
+  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's candidate public bulk-edit API and added an explicit direct-section route discriminator. The Fabric module compiles, packages, and compiles the bridge against the real candidate polymer-common jar. No native S7 integration suite was run, and the Polymer API candidate is still unaccepted, so S7 is not complete.",
+  "worktree": {
+    "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit",
+    "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
+    "branch": "wf/fawe-fast-editing-20261029-s7",
+    "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
+    "head": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
+    "newCommits": [],
+    "uncommittedAtHandoffWrite": true,
+    "modified": [
+      "worldedit-fabric/build.gradle.kts",
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricCommitCoordinator.java",
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java"
+    ],
+    "untracked": [
+      "handoff/s7/blocked-handoff.json",
+      "handoff/s7/implementation-handoff.json",
+      "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
+      "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/polymer/PolymerEditBridge.java"
+    ]
+  },
+  "polymerCandidate": {
+    "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer",
+    "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7",
+    "branch": "wf/fawe-fast-editing-20261029-s7",
+    "pinnedBase": "c0ed648957e5787f23492a6aaf9d6ad545ec200f",
+    "localHead": "a0ce5b3207a6865a4a525c842e6231bb88557ba8",
+    "headSubject": "feat(common): add owner-thread bulk-edit reconciliation API",
+    "coordinates": "eu.pb4:polymer-<module>:0.18.6-fawe-s7.1+26.3",
+    "published": false,
+    "contract": "handoff/s7-polymer/api-contract.json",
+    "contractStatus": "candidate-not-accepted",
+    "polymerHandoff": "handoff/s7-polymer/implementation-handoff.json",
+    "polymerHandoffStatus": "failed",
+    "polymerHandoffPartComplete": false,
+    "candidateCommonJar": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/polymer-common/build/libs/polymer-common-0.18.6-fawe-s7.1+26.3.jar",
+      "sha256": "c4430f4783daee64bf8b229a3099eb226ac1f2778d5de413e0f3a44c76b7bd1f"
+    },
+    "sourceHashMatchesRecordedArchive": true,
+    "recordedApiSourceSha256": "2418fc8b3200a7cd23f7fb76b255291f82373864b0682227e84fc89911b238ce"
+  },
+  "sourceChanges": [
+    {
+      "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/polymer/PolymerEditBridge.java",
+      "state": "new",
+      "sha256": "3968966881a716f3d4adc202576c707ac10c8eec2869f1ec28bfc7673c0e78fb",
+      "summary": "Owner-thread Polymer reservation: detached construction, prepare only for the direct-section route, reconcile actual committed changes against the FAWE receipt, publish after lighting and recipient sends, close exactly once on the owner thread, and refuse off-thread discard of a live token. Non-block payloads never acquire a token."
+    },
+    {
+      "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
+      "state": "modified",
+      "sha256": "6ef22e74615f1af4e512dd8a51b78592b704d03cfcf72174ede73b4cc10bec33",
+      "summary": "Added a provider veto, allowsDirectSections(level, authorized), and a route-aware beforePublication(level, authorized, directSections). The legacy two-argument hook remains source-compatible, is now default-empty, and is delegated to by the three-argument default."
+    },
+    {
+      "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricWorldAccess.java",
+      "state": "modified",
+      "sha256": "0bbde740c519298125d8cbf52d5948ff93964e294f6c4f307b0c062f300c9df0",
+      "summary": "Added owner-thread directSectionEligible (BLOCK only, no block entity on either side, one loaded chunk, minecraft-namespace-only sections) and made writeUnit take an explicit route. The strict route rechecks lifecycle cells, refuses lost eligibility, and never silently falls back while a provider holds section-scoped state; the ordinary route writes every cell through the existing lifecycle path."
+    },
+    {
+      "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/edit/FabricCommitCoordinator.java",
+      "state": "modified",
+      "sha256": "8eca0aa60eade739db0132d508956cdeccca50e5bd24bcb36a29a870a43c0286",
+      "summary": "Computes the direct-section route after authorization, requires every reservation to allow it, passes the route to beforePublication, and passes it to writeUnit. Native/WNA mutations never enter the direct-section route or acquire a Polymer token."
+    },
+    {
+      "file": "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
+      "state": "new",
+      "sha256": "3e15bad9181ae53c14e689d4d69a1d27f1a0751617a486fff116e52769363e57",
+      "summary": "Compile-time signature mirror of the candidate public API. The mirror is a separate source set, never packaged, and not on the runtime classpath; real classes come from polymer-common at runtime."
+    },
+    {
+      "file": "worldedit-fabric/build.gradle.kts",
+      "state": "modified",
+      "sha256": "56f70ef4a0124d0b4122c0b89bc60e93beb3c55dee9bedb790f68eda2bb8970e",
+      "summary": "Wired the polymerApiStub source set into compileJava as compileOnly output and made compileJava depend on the stub classes."
+    }
+  ],
+  "routeSemantics": [
+    "Preparation remains detached and performs no live chunk or Polymer API access.",
+    "The coordinator authorizes every delta, then computes directSectionEligible over the whole final authorized set.",
+    "If eligible, every reservation is consulted through allowsDirectSections; any false veto forces the ordinary per-cell route for the entire proposal.",
+    "The direct route acquires the Polymer token in beforePublication, replaces whole sections without calling LevelChunk.setBlockState, and does not mix ordinary or native writes while the token is live.",
+    "Non-block and lifecycle-heavy proposals do not acquire a Polymer token; they remain transparent to Polymer.",
+    "Polymer refuses more than sixteen sections; FAWE vetoes the direct route before prepare in that case."
+  ],
+  "contractAdherence": [
+    "prepare(LevelChunk, Set<Integer>, Map<BlockPos, BlockState>) is called on the owner thread immediately before the non-yielding direct-section writes, using the exact loaded chunk, absolute section Y numbers, and immutable proposed native states.",
+    "No yield occurs between prepare, section installation, and token.reconcile; reconcile is invoked even for partial applied results.",
+    "token.reconcile() returns Polymer's independently observed actual changes; the bridge compares them with CommitReceipt.applied() by position, state id, and canonical NBT. Disagreement is a finalization failure and is never retried.",
+    "The bridge strips Polymer's keepPacked marker before comparing block-entity NBT so the comparison matches FAWE's full-metadata receipt payload.",
+    "Lighting is awaited through FabricWorldAccess.completePublication before token.publish(). token.publish() runs on the owner thread after that wait.",
+    "token.close() is called exactly once on the owner thread from the coordinator's finish path; successful publication is idempotent.",
+    "A live token cannot reach off-thread discard; discard refuses it. Shutdown before publication closes on the owner thread.",
+    "The bridge uses only the public API surface described by handoff/s7-polymer/api-contract.json; no Polymer private holder map or mixin state is reflected."
+  ],
+  "buildEvidence": {
+    "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar :worldedit-fabric:test",
+    "latestResult": "BUILD SUCCESSFUL in 8s",
+    "unitTests": "NO-SOURCE",
+    "warnings": "13 pre-existing deprecation/removal warnings; none from the changed Polymer/route files",
+    "log": "/tmp/opencode/fawe-s7-build2.log",
+    "realJarCompile": {
+      "command": "javac -cp <candidate polymer-common jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-real-compile PolymerEditBridge.java",
+      "result": "REAL-JAR COMPILE OK",
+      "meaning": "The bridge compiles against the real candidate API classes, not only the local signature mirror."
+    },
+    "stubIsolation": {
+      "compileOutput": "worldedit-fabric/build/classes/java/polymerApiStub/eu/pb4/polymer/common/api/PolymerBulkEdits*.class exists for compilation only",
+      "distJar": "contains com/fastasyncworldedit/fabric/compat/polymer/PolymerEditBridge*.class; no eu/pb4/polymer or PolymerBulkEdits entries",
+      "thinJar": "contains the bridge; no eu/pb4/polymer or PolymerBulkEdits entries",
+      "testmodJar": "contains no polymer stub or API entries"
+    },
+    "artifacts": [
+      {
+        "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
+        "sha256": "fd1a42f52fca67c07f4f040db16aad8a4cafb3909ad5d59670e6e1dfd7f5a42b"
+      },
+      {
+        "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT.jar",
+        "sha256": "9a0edbd78bfc28c2bed0f90deebe430b7e020c91ab4fd6a642caa27d6112f832"
+      },
+      {
+        "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
+        "sha256": "1fd7b1530d13409113a97ee94b4bd768efdb822a0856a9ec833d3add09b35dc1"
+      }
+    ]
+  },
+  "residualGaps": [
+    "The Polymer API candidate remains unaccepted. Its worktree now has a local commit a0ce5b32, but the Polymer handoff reports status failed with partComplete false, and no API artifact is published or release-approved.",
+    "No native S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route.",
+    "test/candidate-manifest.json still stages polymer-bundled 0.18.5-rkc.4, not the 0.18.6-fawe-s7.1 candidate, so the existing native harness would not test this API even if its display prerequisites were available.",
+    "The VE-without-polymer-core discovery combination is not covered. EditIntegrations loads the bridge only when polymer-core is installed, while polymer-common may be installed without core.",
+    "If reading an actual after-value throws after a mutation, FAWE's receipt may under-report applied deltas. Polymer's token would still quarantine the chunk, but FAWE's own quarantine set might not learn about the changed chunk from an empty applied list.",
+    "No FAWE-side negative-control, ordering, recipient, lighting, disconnect, or unload tests exist for this bridge. The coordinator and test probes were not extended for the Polymer route.",
+    "Consumer-owned adapters (chests, portals, portable attachment/history codecs, diagonal walls, Terraform, shaded kalic0re data) remain separate work and are not implemented here.",
+    "The compile-time mirror is manual. Any accepted Polymer API signature or behavior change must be reconciled with src/polymerstub and the bridge before S7 acceptance.",
+    "Full S7 acceptance, combined S7 plus earlier-stage regressions, and S12 consumer/visual acceptance remain open."
+  ],
+  "notClaimed": [
+    "S7 completion or acceptance",
+    "Polymer API stability or publication",
+    "Runtime behavior of the Polymer route on a native server/client",
+    "Any push, merge, release, deployment, or production use"
+  ],
+  "nextTasks": [
+    "Finish and review the Polymer API candidate, then publish or otherwise freeze an accepted contract and replace the compile-time mirror with the real dependency.",
+    "Extend the native harness with a polymer-core candidate profile and direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and VE/core-absent discovery.",
+    "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
+    "Implement consumer-owned adapters in their own repositories, then run combined S7 and earlier-stage regressions and S12 consumer/visual acceptance."
+  ]
+}
