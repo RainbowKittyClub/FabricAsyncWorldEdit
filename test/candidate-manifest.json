@@ -1511,8 +1511,8 @@
       ]
     },
     "candidate": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s3-s5/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "562c185e65637933a1eae781190a372e29cce25d7e3c0c9ea38e5323de7c9a53",
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
+      "sha256": "b1f700d9a340a406982e9b59501b749014069bb0404386d6787c1b3a112f9752",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
@@ -1569,9 +1569,283 @@
       ]
     },
     "lifecycle-probe": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/fawe-fast-editing-20261029-s3-s5/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "e74139e8453b7cdcfa5fd416f14636c8e9fa6d1f60dd29c466419f89eb00c36b",
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
+      "sha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba",
       "nested": []
+    },
+    "polymer-accepted": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/build/libs/polymer-bundled-0.18.6-fawe-s7.1+26.3.jar",
+      "sha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838",
+      "bytes": 1571066,
+      "nested": [
+        {
+          "entry": "META-INF/jars/polymer-autohost-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "26966e8f04f096e5dc8a41790a8a2a7eefd7adb9dca5ebec9a73cc5d55d5eaf5",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-blocks-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "c5917e2c01e5ae4389bfada1826a3445928658cbd38bc729b11f8d39bae5ef27",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-common-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "c4430f4783daee64bf8b229a3099eb226ac1f2778d5de413e0f3a44c76b7bd1f",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-core-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "61c8c92e4da53e12dee5ab40c466a7199aa71eaa49d9d3fddb4f0f2e508cff02",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-resource-pack-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "5f6958ab62546db5b06201cd436ffad512ad837e8a48d225a6147b8ace89f626",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-resource-pack-extras-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "0d90d0ab04af4d52ce9de7795a25ba41d1079a0828e244ae75c60ca4b9976275",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-sound-patcher-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "29e2824211539c8eaf1fdfb96fc64c46426cfd811c3b9c2db61e2d43725fc610",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-virtual-entity-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "0c160cd0c214ce45edd872e3e546ec819611687c31bd858c8d90dfc884bdfee7",
+          "nested": []
+        }
+      ]
+    },
+    "fabric-api-polymer": {
+      "path": "/home/kgadberry/.gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api/fabric-api/0.162.0+26.3/273cd2dcbd92d1559edcc91c9f23fee47f6ff93f/fabric-api-0.162.0+26.3.jar",
+      "sha256": "8626c189b702f466800b1c8ddac6203cf8a1e0bdaee75a5f9a33b18c2baa81b1",
+      "bytes": 1772377,
+      "nested": [
+        {
+          "entry": "META-INF/jars/fabric-advancement-api-v1-1.0.0+38c7a2d55d.jar",
+          "sha256": "4e58d2f35b8b349949691b123033ba7158a921d351cfbe0d1376c4b2b4c90c15",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-api-base-2.0.6+fcdff87f5d.jar",
+          "sha256": "e3b64039e8f261cc24a5013cb8b442cf368f08afa28d01ecdf97f3ccdeb7b63c",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-api-lookup-api-v1-2.0.24+3434d6d95d.jar",
+          "sha256": "0ec468396a47cd8ba892294b2c230d4ce31558b6bb9653ff4d886f699f340e67",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-biome-api-v1-20.1.0+c6aa69a85d.jar",
+          "sha256": "64bb6654ff4ad498f792766b343b280bb811d3fa6a6fc7d5812405217aba519e",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-block-api-v1-3.1.0+0ae6f9115d.jar",
+          "sha256": "0a9d70f750662a5417d2cbab5835173671a155478ae68a8b7875443a8b26e5de",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-block-getter-api-v2-2.0.9+3434d6d95d.jar",
+          "sha256": "6ee8e9e475874df839974c3f80807aaaf845cd833b027500519ad4ce551d332d",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-command-api-v2-3.1.2+fcdff87f5d.jar",
+          "sha256": "58072787b5b5d171a7e65b1eb7a9c006bd48b940e12c870d7b23e0d5173cf2c9",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-content-registries-v0-15.0.4+74ed1ea55d.jar",
+          "sha256": "f25c676005d542fe8d0ea742a2eb98cba964218d774f6e17e0ae82ad0ce87889",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-convention-tags-v2-4.10.3+6b5b47fd5d.jar",
+          "sha256": "2ddeb51ad366da4225de9e9f113030ed55d7527c08c25950172d8a246a6c2fda",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-crash-report-info-v1-1.0.7+fcdff87f5d.jar",
+          "sha256": "81a9a1db48de260919e4220d0c2cf6362083475ebd803f14e341516d42a26d5a",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-creative-tab-api-v1-5.0.21+fcdff87f5d.jar",
+          "sha256": "b865c563ee0b02e5bf5b40c29e57c6b6533c6f6f56e97fdbcb004eadca3be9db",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-data-attachment-api-v1-2.2.31+b9b88df45d.jar",
+          "sha256": "722f3a092f668ae7bc5fee1ae6337f72eca0cef7c14bf3daba5218499bdbcd69",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-data-generation-api-v1-27.3.0+5be2453c5d.jar",
+          "sha256": "fc431fedf521f4ebcb3f28655fb9006cb5feba348ac2891bb116011ff86057a2",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-debug-api-v1-1.0.4+3434d6d95d.jar",
+          "sha256": "e9806c1b6a5d4aecb8029fac497d43766b2c9612df6b925cc9e9d994c28834ba",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-dimensions-v1-5.1.19+47f74c985d.jar",
+          "sha256": "ced046d84afdc22fd85c2a6e7420099ca2c86156669b064ed9a5c4e98d81f7ae",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-entity-events-v1-6.0.4+3434d6d95d.jar",
+          "sha256": "67af73392b583a8ce56693a769cdc2c0ea16b7970d30a80c0216d58df45465d5",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-events-interaction-v0-5.3.7+b9b88df45d.jar",
+          "sha256": "e507339676f4ae1a6468bdac128e077e6022a702aedeea07232573eacb20207f",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-game-rule-api-v1-4.0.10+3434d6d95d.jar",
+          "sha256": "5cbd6be7ed872b3aa2e10695ec8f0740c408de69caa264028623edc8be6e4961",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-item-api-v1-14.7.0+cf6bc2db5d.jar",
+          "sha256": "5128bd7b303de8aef6dc03ee1ad39c2a8ba98320c251f3674787761222b99bf8",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-key-mapping-api-v1-2.0.8+3434d6d95d.jar",
+          "sha256": "00dc27fe09cca1b1af6346be12a86df4e49d33717dfbe74af4efca5673eb6b7d",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-lifecycle-events-v1-4.1.9+ffef5f675d.jar",
+          "sha256": "fc47f06fa9ce4145ad925164a6eccc436f7ff504cf7d1e766a15699b82cd3e74",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-loot-api-v3-4.0.8+4068fd645d.jar",
+          "sha256": "ff225924d0569f113f25bb4c51c9e8ceb2b73ed6198499c81b862d4186fb719f",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-menu-api-v1-2.0.28+ed66f0a35d.jar",
+          "sha256": "ca22f06ef29de5d45ae930d6d84da39045321df62005d1c6e124e077331a1d07",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-message-api-v1-7.0.10+3434d6d95d.jar",
+          "sha256": "ab4e1143c20301463348612d1b440878ae2eacd60f66112ce187c6c4c841156d",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-model-loading-api-v1-8.0.35+fcdff87f5d.jar",
+          "sha256": "1479d2a6fc9c44c0038311ad64a51dd01d2a9509547501576ab68eec2885464c",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-networking-api-v1-6.3.9+b9b88df45d.jar",
+          "sha256": "bd9df58c724f7b476d930814665f5f3ac3849d8442293fbdf54197b8c718b478",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-object-builder-api-v1-24.1.10+3434d6d95d.jar",
+          "sha256": "2807750229fa894ea8164d6573952600cb7c8040a05ea8a540ff81a566c2366d",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-particles-v1-5.0.25+3434d6d95d.jar",
+          "sha256": "9b1e98a48b6ee647ba66fcdf23cc6280b32b2e2d27c22d44f7fee75cee4fcc75",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-permission-api-v1-1.0.8+fcdff87f5d.jar",
+          "sha256": "d8e13a6fe81674be65163bbee6422892562d0d6265275f6c0e280b0c7385493a",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-recipe-api-v1-10.0.9+b9b88df45d.jar",
+          "sha256": "dbce796a60c770f24b1ceffbca038a7d9871073e78fda6886d15c94c9d999ec5",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-registry-sync-v0-8.0.2+1ca9f6365d.jar",
+          "sha256": "ad2e7ab538ba920561572f09b8cef4264ac6af8aa4a703a3b39c242fdbbd37f1",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-renderer-api-v1-17.0.15+79385d0b5d.jar",
+          "sha256": "412f1e3ea00f5af9babd52ebd388081f9f380c84b71935ff441f41936caed860",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-renderer-indigo-9.1.23+b9d63e335d.jar",
+          "sha256": "f46066891737dc270ed9892cb514d92d72a8012c71f4f27cbb20167aad512776",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-rendering-fluids-v1-6.0.6+3434d6d95d.jar",
+          "sha256": "35b2f33dd1db506a8d6eda598e8f263a773a418e8453d3c18986cb4136536165",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-rendering-v1-27.0.14+901a437c5d.jar",
+          "sha256": "0dab025d36a81dee8d4c6d0f785d3e41765a7e939a4e594f146a6749ede91d6e",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-resource-conditions-api-v1-6.2.0+0d124ae85d.jar",
+          "sha256": "a1b65f27ac0a4697d15c9c52c2fd71a49629e2e6f0b9e46b33588139c27686ab",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-resource-loader-v0-3.3.26+4fc5413f5d.jar",
+          "sha256": "a3b0cb0cb626b19e6d03422916554c133cca5c9db091b237f7513e86f429c7e0",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-resource-loader-v1-3.0.4+ba0d6c0d5d.jar",
+          "sha256": "b62fa7d0bf67982ab1f6feafc88899e05a877a5215bf3d91e0b1b51c46ec2f89",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-screen-api-v1-5.2.4+48607d035d.jar",
+          "sha256": "2d940d1633d86a6cbe5efb559becde9d17fa6aedb2311add7cda1aa02769665a",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-serialization-api-v1-2.0.7+74ed1ea55d.jar",
+          "sha256": "0af4f059a581626bbe5680c9f3f84aeb6d603d9ee654714bfbc32e31e9a3a693",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-sound-api-v1-2.0.7+3434d6d95d.jar",
+          "sha256": "1a5ed88972366eb2f68df816d9c907686274649407e77100d92fd0cdf5c989b6",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-tag-api-v1-2.1.10+fcdff87f5d.jar",
+          "sha256": "472e3a97e3b11c72ac8fc54b425f8e7130b861fa8b8e0b64a66ab6833353056a",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-transfer-api-v1-8.0.25+fcdff87f5d.jar",
+          "sha256": "f7d81e91f0f326dff6a393738b623a60bbe0afae86dc6c70431e103fa97edbd6",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/fabric-transitive-access-wideners-v1-8.1.16+52268a0e5d.jar",
+          "sha256": "71ea7cdf8b94cde75d3f6ddd0ab66370e3b1e40dc05558338df929ca514c918b",
+          "nested": []
+        }
+      ]
     }
   },
   "profiles": {
@@ -1583,12 +1857,17 @@
       "candidate",
       "fabric-api",
       "lifecycle-probe"
+    ],
+    "polymer": [
+      "candidate",
+      "fabric-api-polymer",
+      "lifecycle-probe",
+      "polymer-accepted"
     ]
   },
   "unavailableProfiles": [
     "claims",
     "audit",
-    "polymer",
     "full",
     "vanilla-light",
     "backend-db",
