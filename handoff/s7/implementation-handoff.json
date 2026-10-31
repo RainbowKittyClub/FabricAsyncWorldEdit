@@ -10,15 +10,19 @@
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
     "branch": "wf/fawe-fast-editing-20261029-s7",
     "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
+    "head": "bb53179516ff95b31e9fe29c4b0f3beb13856f03",
     "newCommits": [
       {
         "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
         "subject": "feat(fabric): consume Polymer bulk-edit reconciliation"
+      },
+      {
+        "head": "bb53179516ff95b31e9fe29c4b0f3beb13856f03",
+        "subject": "fix(fabric): surface Polymer fast-route refusals"
       }
     ],
     "uncommittedAtHandoffWrite": true,
-    "commitNote": "The implementation and initial handoff were committed as 5851347b9 after the handoff was written; this metadata update is a follow-up commit.",
+    "commitNote": "The bridge and handoff were committed in stages: 5851347b9 (initial implementation), bb5317951 (explicit fast-route refusal messages). Metadata-only handoff commits follow.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
@@ -68,8 +72,8 @@
     {
       "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/polymer/PolymerEditBridge.java",
       "state": "new",
-      "sha256": "3968966881a716f3d4adc202576c707ac10c8eec2869f1ec28bfc7673c0e78fb",
-      "summary": "Owner-thread Polymer reservation: detached construction, prepare only for the direct-section route, reconcile actual committed changes against the FAWE receipt, publish after lighting and recipient sends, close exactly once on the owner thread, and refuse off-thread discard of a live token. Non-block payloads never acquire a token."
+      "sha256": "3755a1cd0ff8f3af5511c44c910ec9daec7beed8f7f9be7014623019a39b1291",
+      "summary": "Owner-thread Polymer reservation: detached construction, prepare only for the direct-section route, reconcile actual committed changes against the FAWE receipt, publish after lighting and recipient sends, close exactly once on the owner thread, and refuse off-thread discard of a live token. Prepare refusals fail before any write with explicit no-writes/reload guidance. Non-block payloads never acquire a token."
     },
     {
       "file": "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
@@ -107,6 +111,7 @@
     "The coordinator authorizes every delta, then computes directSectionEligible over the whole final authorized set.",
     "If eligible, every reservation is consulted through allowsDirectSections; any false veto forces the ordinary per-cell route for the entire proposal.",
     "The direct route acquires the Polymer token in beforePublication, replaces whole sections without calling LevelChunk.setBlockState, and does not mix ordinary or native writes while the token is live.",
+    "A prepare refusal (unsupported attachment, Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write with an explicit no-writes message. The operation is not retried and the coordinator never switches routes mid-publication; unload/reload is required when the chunk is quarantined or no longer the loaded instance.",
     "Non-block and lifecycle-heavy proposals do not acquire a Polymer token; they remain transparent to Polymer.",
     "Polymer refuses more than sixteen sections; FAWE vetoes the direct route before prepare in that case."
   ],
@@ -121,14 +126,14 @@
     "The bridge uses only the public API surface described by handoff/s7-polymer/api-contract.json; no Polymer private holder map or mixin state is reflected."
   ],
   "buildEvidence": {
-    "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar :worldedit-fabric:test",
-    "latestResult": "BUILD SUCCESSFUL in 8s",
+    "latestCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava :worldedit-fabric:testmodJar :worldedit-fabric:shadowJar",
+    "latestResult": "BUILD SUCCESSFUL in 8s after the refusal-message change; the earlier full command including :worldedit-fabric:test also passed with test NO-SOURCE",
     "unitTests": "NO-SOURCE",
     "warnings": "13 pre-existing deprecation/removal warnings; none from the changed Polymer/route files",
     "log": "/tmp/opencode/fawe-s7-build2.log",
     "realJarCompile": {
-      "command": "javac -cp <accepted bundle META-INF/jars/polymer-common-...jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-accepted-compile PolymerEditBridge.java",
-      "result": "ACCEPTED-BUNDLE COMPILE OK",
+      "command": "javac -cp <accepted bundle META-INF/jars/polymer-common-...jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-accepted-compile2 PolymerEditBridge.java",
+      "result": "ACCEPTED-BUNDLE COMPILE OK (refusal messages)",
       "meaning": "The bridge compiles against the exact common jar nested in the accepted bundle, not only the local signature mirror. The nested jar sha256 equals polymer-common/build/libs/...."
     },
     "acceptedBundleVerification": {
@@ -138,7 +143,7 @@
       "virtualEntityParticipant": "eu.pb4.polymer.virtualentity.impl.VirtualBulkEdits",
       "entrypointKey": "polymer:bulk_edits",
       "recheckCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava",
-      "recheckResult": "BUILD SUCCESSFUL in 5s (up-to-date)"
+      "recheckResult": "BUILD SUCCESSFUL in 8s after the refusal-message change"
     },
     "stubIsolation": {
       "compileOutput": "worldedit-fabric/build/classes/java/polymerApiStub/eu/pb4/polymer/common/api/PolymerBulkEdits*.class exists for compilation only",
@@ -149,11 +154,11 @@
     "artifacts": [
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-        "sha256": "fd1a42f52fca67c07f4f040db16aad8a4cafb3909ad5d59670e6e1dfd7f5a42b"
+        "sha256": "bb7b2d1f35556fce81ae8fbc639f410853b8fc3a702813597cd8ac2b64a4bb92"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT.jar",
-        "sha256": "9a0edbd78bfc28c2bed0f90deebe430b7e020c91ab4fd6a642caa27d6112f832"
+        "sha256": "f87d4de44cedf308215f1ae54ef644b6e28835a5c9c369429f66a97d61ae51c0"
       },
       {
         "path": "worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
@@ -170,7 +175,7 @@
     "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route.",
     "test/candidate-manifest.json still stages polymer-bundled 0.18.5-rkc.4, not the accepted 0.18.6-fawe-s7.1 bundle, so the existing native harness would not test this API even if its display prerequisites were available.",
     "Standalone polymer-common without polymer-core is unsupported: isModLoaded(\"polymer-core\") is false, so EditIntegrations keeps the bridge fail-closed. The accepted bundled distribution nests common and core as sibling jars, so the intended install loads the bridge.",
-    "Manual attachments and Immersive Portals make the VE participant throw UnsupportedOperationException from prepare. FAWE currently fails the unit before any write rather than falling back to the ordinary route; confirm whether fail-closed or a route retry is intended.",
+    "A prepare refusal (unsupported attachment/Immersive Portals, reserved/quarantined chunk, or unloaded chunk) fails the unit before any write with an explicit no-writes/reload message. FAWE deliberately does not fall back to the ordinary route in this revision; no untracked writes or retries occur.",
     "If reading an actual after-value throws after a mutation, FAWE's receipt may under-report applied deltas. Polymer's token would still quarantine the chunk, but FAWE's own quarantine set might not learn about the changed chunk from an empty applied list.",
     "No FAWE-side negative-control, ordering, recipient, lighting, disconnect, or unload tests exist for this bridge. The coordinator and test probes were not extended for the Polymer route.",
     "Consumer-owned adapters (chests, portals, portable attachment/history codecs, diagonal walls, Terraform, shaded kalic0re data) remain separate work and are not implemented here.",
