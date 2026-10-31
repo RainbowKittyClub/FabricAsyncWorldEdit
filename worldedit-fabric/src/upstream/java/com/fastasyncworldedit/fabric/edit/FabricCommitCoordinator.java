@@ -329,8 +329,9 @@ public final class FabricCommitCoordinator {
                 outcome = CommitReceipt.Outcome.CANCELLED_BEFORE_WRITE;
             } else {
                 ServerPlayer player = server.getPlayerList().getPlayer(proposal.context().actorId());
-                if (player == null || player.hasDisconnected()) {
-                    throw new IllegalStateException("Current operator is disconnected; administrative policy is not installed");
+                if (player == null || player.hasDisconnected()
+                        || !FabricRegionCommands.authorized(proposal.context(), player)) {
+                    throw new IllegalStateException("Current operator is disconnected or command authority is unavailable");
                 }
                 if (!access.matches(proposal, level)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
@@ -357,27 +358,35 @@ public final class FabricCommitCoordinator {
                     for (EditIntegration.Reservation reservation : unit.reservations) {
                         reservation.beforePublication(level, List.copyOf(authorized));
                     }
-                    for (EditDelta delta : authorized) {
-                        EditValue actualBefore = access.read(level, delta);
-                        if (!Objects.equals(actualBefore, delta.before())) {
-                            throw new IllegalStateException("A prepublication callback changed the authorized value");
+                    if (!access.matches(proposal, level)) {
+                        throw new IllegalStateException("A prepublication callback changed the read footprint");
+                    }
+                    for (List<EditDelta> group : access.publicationUnits(authorized)) {
+                        List<EditDelta> permitted = new ArrayList<>();
+                        for (EditDelta delta : group) {
+                            boolean stillAllowed = !proposal.context().cancellation().isCancelled()
+                                    && FabricRegionCommands.authorized(proposal.context(), player);
+                            for (EditIntegration.Reservation reservation : unit.reservations) {
+                                stillAllowed &= reservation.authorize(level, player, proposal.context(), delta);
+                            }
+                            if (stillAllowed) permitted.add(delta);
+                            else denied++;
                         }
-                        boolean stillAllowed = !proposal.context().cancellation().isCancelled();
-                        for (EditIntegration.Reservation reservation : unit.reservations) {
-                            stillAllowed &= reservation.authorize(level, player, proposal.context(), delta);
-                        }
-                        if (!stillAllowed) {
-                            denied++;
-                            continue;
+                        for (EditDelta delta : permitted) {
+                            if (!Objects.equals(access.read(level, delta), delta.before())) {
+                                throw new IllegalStateException("Authorization changed an intended before-value");
+                            }
                         }
                         try {
-                            access.write(level, delta, proposal.context().sideEffects());
+                            access.writeUnit(level, permitted, proposal.context().sideEffects());
                         } finally {
-                            EditValue actualAfter = access.read(level, delta);
-                            if (!Objects.equals(actualBefore, actualAfter)) {
-                                applied.add(new CommitReceipt.AppliedDelta(unit.operation.sequence++,
-                                        new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(), delta.key(),
-                                                actualBefore, actualAfter)));
+                            for (EditDelta delta : permitted) {
+                                EditValue actualAfter = access.read(level, delta);
+                                if (!Objects.equals(delta.before(), actualAfter)) {
+                                    applied.add(new CommitReceipt.AppliedDelta(unit.operation.sequence++,
+                                            new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(), delta.key(),
+                                                    delta.before(), actualAfter)));
+                                }
                             }
                         }
                     }
@@ -404,6 +413,15 @@ public final class FabricCommitCoordinator {
     // A maintenance/recording failure is never allowed to resubmit a world mutation.
     private void finalizeUnit(Pending unit, ServerLevel level, CommitReceipt receipt, Throwable writeFailure) {
         CompletionStage<Void> finalized = CompletableFuture.completedFuture(null);
+        var finalizationFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>(writeFailure);
+        var historyFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        CompletionStage<Void> writtenHistory = CompletableFuture.completedFuture(null).thenComposeAsync(
+                unused -> Objects.requireNonNull(unit.operation.history.apply(receipt)), detachedExecutor)
+                .handle((unused, failure) -> {
+                    historyFailure.set(failure);
+                    if (failure != null) finalizationFailure.compareAndSet(null, failure);
+                    return (Void) null;
+                });
         if (level != null) {
             for (EditIntegration.Reservation reservation : unit.reservations) {
                 CompletionStage<Void> maintenance;
@@ -414,14 +432,32 @@ public final class FabricCommitCoordinator {
                 }
                 finalized = finalized.thenCombine(maintenance, (left, right) -> null);
             }
+            finalized = finalized.handle((unused, failure) -> {
+                if (failure != null) finalizationFailure.compareAndSet(null, failure);
+                return (Void) null;
+            }).thenCompose(unused -> access.completePublication(level, receipt, finalizationFailure.get() == null))
+                    .thenCompose(unused -> {
+                        owner();
+                        if (unit.terminal || finalizationFailure.get() != null) return CompletableFuture.completedFuture(null);
+                        CompletionStage<Void> publication = CompletableFuture.completedFuture(null);
+                        for (EditIntegration.Reservation reservation : unit.reservations) {
+                            CompletionStage<Void> stage;
+                            try {
+                                stage = Objects.requireNonNull(reservation.publish(level, receipt));
+                            } catch (Throwable failure) {
+                                stage = CompletableFuture.failedFuture(failure);
+                            }
+                            publication = publication.thenCombine(stage, (left, right) -> null);
+                        }
+                        return publication;
+                    });
         }
-        var finalizationFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>(writeFailure);
         finalized = finalized.handle((unused, failure) -> {
             if (failure != null) {
                 finalizationFailure.compareAndSet(null, failure);
             }
             return (Void) null;
-        }).thenComposeAsync(unused -> {
+        }).thenCombine(writtenHistory, (left, right) -> (Void) null).thenComposeAsync(unused -> {
             synchronized (this) {
                 if (unit.terminal) {
                     throw new RejectedExecutionException("Shutdown interrupted finalization");
@@ -430,8 +466,8 @@ public final class FabricCommitCoordinator {
             }
             CompletionStage<Void> recorded;
             try {
-                recorded = Objects.requireNonNull(unit.operation.history.apply(receipt))
-                        .thenCompose(unusedHistory -> Objects.requireNonNull(unit.afterHistory.apply(receipt)));
+                recorded = historyFailure.get() == null ? Objects.requireNonNull(unit.afterHistory.apply(receipt))
+                        : CompletableFuture.failedFuture(historyFailure.get());
             } catch (Throwable failure) {
                 recorded = CompletableFuture.failedFuture(failure);
             }

@@ -3,6 +3,8 @@
     "package": "com.sk89q.worldedit.fabric.mixin",
     "compatibilityLevel": "JAVA_25",
     "mixins": [
+        "InvokerPlayerChunkSender",
+        "MixinWnaOrdering",
         "MixinBiomeEditRevision",
         "MixinBlockEntityEditRevision",
         "MixinChunkEditRevision",

@@ -44,6 +44,7 @@ public final class FabricEdits {
     private final ThreadPoolExecutor recording = executor("fawe-coordinated-recording");
     private final Map<CompletableFuture<List<CommitReceipt>>, EditActorContext> admitted = new java.util.concurrent.ConcurrentHashMap<>();
     private boolean stopped;
+    private long repreparations;
     private CompletionStage<Void> drain = CompletableFuture.completedFuture(null);
 
     // The service is constructed only by the opt-in server lifecycle.
@@ -57,6 +58,7 @@ public final class FabricEdits {
 
     /** Register lifecycle hooks once, without enabling the experimental backend by default. */
     public static void initialize() {
+        FabricRegionCommands.initialize();
         FabricChunkTickets.register();
         ServerLifecycleEvents.START_DATA_PACK_RELOAD.register((server, resources) -> {
             if (active != null && active.server == server) {
@@ -106,6 +108,52 @@ public final class FabricEdits {
     public CompletionStage<List<CommitReceipt>> submit(EditActorContext context, List<BlockVector2> footprint,
             ChangeSet history, Consumer<SingleThreadQueueExtent> edit) {
         return submitUnits(context, List.of(new Unit(footprint, edit)), history);
+    }
+
+    /**
+     * Retry a repeatable single-destination callback at most twice after a zero-write conflict.
+     * The callback must be deterministic from its fresh snapshots and have no external effects.
+     */
+    public CompletionStage<List<CommitReceipt>> submitRetrying(EditActorContext context,
+            BlockVector2 destination, ChangeSet history, Consumer<SingleThreadQueueExtent> repeatable) {
+        owner();
+        return retry(context, destination, history, repeatable, 0);
+    }
+
+    // A published or failed mutation is never retried, including a notification failure.
+    private CompletionStage<List<CommitReceipt>> retry(EditActorContext context, BlockVector2 destination,
+            ChangeSet history, Consumer<SingleThreadQueueExtent> repeatable, int attempt) {
+        CompletableFuture<List<CommitReceipt>> result = new CompletableFuture<>();
+        submit(context, List.of(destination), history, repeatable).whenComplete((receipts, failure) -> {
+            if (failure != null) {
+                result.completeExceptionally(failure);
+            } else if (attempt < 2 && receipts.size() == 1
+                    && receipts.getFirst().outcome() == CommitReceipt.Outcome.CONFLICT
+                    && receipts.getFirst().applied().isEmpty() && !context.cancellation().isCancelled()) {
+                server.execute(() -> {
+                    try {
+                        repreparations++;
+                        retry(context, destination, history, repeatable, attempt + 1).whenComplete((value, problem) -> {
+                            if (problem == null) result.complete(value);
+                            else result.completeExceptionally(problem);
+                        });
+                    } catch (Throwable problem) {
+                        result.completeExceptionally(problem);
+                    }
+                });
+            } else {
+                result.complete(receipts);
+            }
+        });
+        return result.minimalCompletionStage();
+    }
+
+    /** Publication counters include only owner-thread installs and completed maintenance. */
+    public Map<String, Long> publicationStatistics() {
+        owner();
+        Map<String, Long> stats = new LinkedHashMap<>(access.statistics());
+        stats.put("repreparations", repreparations);
+        return Map.copyOf(stats);
     }
 
     /** One detached chunk callback, with all destination and neighbor reads declared in advance. */
@@ -331,6 +379,7 @@ public final class FabricEdits {
     private void stop() {
         owner();
         stopped = true;
+        access.stop();
         synchronized (admitted) {
             admitted.values().forEach(context -> context.cancellation().cancel());
         }

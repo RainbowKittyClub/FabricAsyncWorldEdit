@@ -21,7 +21,6 @@ package com.sk89q.worldedit.fabric;
 
 import com.fastasyncworldedit.core.nbt.FaweCompoundTag;
 import com.fastasyncworldedit.core.queue.IChunkGet;
-import com.fastasyncworldedit.core.queue.implementation.blocks.NullChunkGet;
 import com.fastasyncworldedit.core.queue.implementation.packet.ChunkPacket;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -257,19 +256,25 @@ public class FabricWorld extends AbstractWorld {
     @Override
     public boolean setBiome(BlockVector3 position, BiomeType biome) {
         checkNotNull(position);
-        checkNotNull(biome);
+        return setBiome(position.x(), position.y(), position.z(), biome);
+    }
 
-        ChunkAccess chunk = getWorld().getChunk(position.x() >> 4, position.z() >> 4);
-        // Screw it, we know it's really mutable...
-        var biomeArray = (PalettedContainer<Holder<Biome>>) chunk.getSection(chunk.getSectionIndex(position.y())).getBiomes();
-        biomeArray.getAndSetUnchecked(
-            position.x() & 3, position.y() & 3, position.z() & 3,
-            getWorld().registryAccess().lookup(Registries.BIOME)
-                .orElseThrow()
-                .getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.parse(biome.id())))
-        );
-        chunk.markUnsaved();
-        return true;
+    @Override
+    public boolean setBiome(int x, int y, int z, BiomeType biome) {
+        checkNotNull(biome);
+        return com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
+            ChunkAccess chunk = getWorld().getChunk(x >> 4, z >> 4);
+            if (chunk instanceof com.fastasyncworldedit.fabric.edit.ChunkRevision revision) {
+                revision.worldedit$advanceEditRevision();
+            }
+            // The live biome palette uses quart cells, not block coordinates.
+            var biomeArray = (PalettedContainer<Holder<Biome>>) chunk.getSection(chunk.getSectionIndex(y)).getBiomes();
+            biomeArray.getAndSetUnchecked((x >> 2) & 3, (y >> 2) & 3, (z >> 2) & 3,
+                    getWorld().registryAccess().lookupOrThrow(Registries.BIOME)
+                            .getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.parse(biome.id()))));
+            chunk.markUnsaved();
+            return true;
+        });
     }
 
     private static final LoadingCache<ServerLevel, FabricFakePlayer> fakePlayers
@@ -776,7 +781,8 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public IChunkGet get(int chunkX, int chunkZ) {
-        return NullChunkGet.getInstance();
+        throw new UnsupportedOperationException(
+                "Live queue access requires FabricEdits snapshots; use the asynchronous API or /fawe-coordinated");
     }
 
     @Override

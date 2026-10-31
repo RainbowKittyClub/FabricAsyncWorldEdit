@@ -1,8 +1,14 @@
 package com.fastasyncworldedit.fabric.edit;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 import com.sk89q.worldedit.fabric.FabricAdapter;
 import com.sk89q.worldedit.util.SideEffect;
@@ -33,6 +39,12 @@ public final class FabricWorldAccess {
     private final MinecraftServer server;
     private FabricStateMapping mapping;
     private boolean mappingValid = true;
+    private final Set<CompletableFuture<Void>> maintenance = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private boolean stopping;
+    private long installedSections;
+    private long fallbackWrites;
+    private long relitUnits;
+    private long sentUnits;
 
     /** Bind one loaded registry generation; no live object is handed to detached preparation. */
     public FabricWorldAccess(MinecraftServer server, FabricStateMapping mapping) {
@@ -136,7 +148,8 @@ public final class FabricWorldAccess {
                             throw new IllegalArgumentException("NBT on a block without a block entity");
                         }
                     }
-                    if (delta.before().nbt() != null || delta.after().nbt() != null) {
+                    if (mapping.nativeState(delta.before().id()).hasBlockEntity()
+                            || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
                         heavy++;
                     }
                 }
@@ -180,6 +193,113 @@ public final class FabricWorldAccess {
         };
     }
 
+    /** Partition simple cells into section installs and lifecycle-heavy writes into single-cell units. */
+    public List<List<EditDelta>> publicationUnits(List<EditDelta> deltas) {
+        owner();
+        Map<Integer, List<EditDelta>> sections = new LinkedHashMap<>();
+        List<List<EditDelta>> units = new ArrayList<>();
+        for (EditDelta delta : deltas) {
+            if (delta.kind() == EditDelta.Kind.BLOCK
+                    && !mapping.nativeState(delta.before().id()).hasBlockEntity()
+                    && !mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+                sections.computeIfAbsent(delta.y() >> 4, ignored -> new ArrayList<>()).add(delta);
+            } else {
+                units.add(List.of(delta));
+            }
+        }
+        sections.values().forEach(cells -> units.add(List.copyOf(cells)));
+        return List.copyOf(units);
+    }
+
+    /** Publish a prevalidated unit; receipt capture belongs in the caller's finally block. */
+    public void writeUnit(ServerLevel level, List<EditDelta> deltas, SideEffectSet effects) {
+        owner();
+        if (deltas.isEmpty()) return;
+        EditDelta first = deltas.getFirst();
+        if (first.kind() == EditDelta.Kind.BLOCK
+                && !mapping.nativeState(first.before().id()).hasBlockEntity()
+                && !mapping.nativeState(first.after().id()).hasBlockEntity()) {
+            LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
+            var section = chunk.getSection(chunk.getSectionIndex(first.y()));
+            if (section.maybeHas(state -> !BuiltInRegistries.BLOCK.getKey(state.getBlock())
+                    .getNamespace().equals("minecraft"))) {
+                for (EditDelta delta : deltas) {
+                    write(level, delta, effects);
+                    fallbackWrites++;
+                }
+            } else {
+                FabricSectionPublication.install(level, chunk, deltas, mapping);
+                installedSections++;
+            }
+        } else {
+            if (deltas.size() != 1) throw new IllegalArgumentException("Lifecycle fallback is one cell");
+            write(level, first, effects);
+            fallbackWrites++;
+        }
+    }
+
+    /** Await vanilla light work, then construct updates on the owner thread for each watcher. */
+    public synchronized CompletionStage<Void> completePublication(ServerLevel level, CommitReceipt receipt, boolean send) {
+        if (stopping) return CompletableFuture.failedFuture(new IllegalStateException("Publication maintenance stopped"));
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        maintenance.add(result);
+        result.whenComplete((unused, failure) -> maintenance.remove(result));
+        server.execute(() -> {
+            if (stopping || result.isDone()) {
+                result.completeExceptionally(new IllegalStateException("Publication maintenance stopped"));
+                return;
+            }
+            if (receipt.applied().isEmpty()) {
+                result.complete(null);
+                return;
+            }
+            CompletableFuture<?> light;
+            try {
+                light = level.getChunkSource().getLightEngine().waitForPendingTasks(receipt.chunkX(), receipt.chunkZ());
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+                return;
+            }
+            light.whenComplete((unused, failure) -> server.execute(() -> {
+                        if (result.isDone()) return;
+                        if (failure != null) {
+                            result.completeExceptionally(failure);
+                            return;
+                        }
+                        try {
+                            owner();
+                            relitUnits++;
+                            LevelChunk chunk = loadedChunk(level, receipt.chunkX(), receipt.chunkZ());
+                            if (send) {
+                                for (var player : level.getChunkSource().chunkMap.getPlayers(chunk.getPos(), false)) {
+                                    com.sk89q.worldedit.fabric.mixin.InvokerPlayerChunkSender.worldedit$sendChunk(
+                                            player.connection, level, chunk);
+                                }
+                                sentUnits++;
+                            }
+                            result.complete(null);
+                        } catch (Throwable problem) {
+                            result.completeExceptionally(problem);
+                        }
+                    }));
+        });
+        return result.minimalCompletionStage();
+    }
+
+    /** Settle outstanding maintenance before the owner thread stops servicing callbacks. */
+    public synchronized void stop() {
+        owner();
+        stopping = true;
+        maintenance.forEach(future -> future.completeExceptionally(new IllegalStateException("Server stopping")));
+    }
+
+    /** Owner-thread counters establish which publication and completion paths ran. */
+    public Map<String, Long> statistics() {
+        owner();
+        return Map.of("sections", installedSections, "fallbackWrites", fallbackWrites,
+                "relit", relitUnits, "sent", sentUnits, "maintenance", (long) maintenance.size());
+    }
+
     /** Guarded vanilla fallback; callers must have validated and authorized this exact delta. */
     public void write(ServerLevel level, EditDelta delta, SideEffectSet effects) {
         LevelChunk chunk = loadedChunk(level, delta.x() >> 4, delta.z() >> 4);
@@ -203,7 +323,6 @@ public final class FabricWorldAccess {
                 if (effects.shouldApply(SideEffect.POI_UPDATE)) {
                     level.updatePOIOnBlockStateChange(pos, oldState, state);
                 }
-                level.getChunkSource().blockChanged(pos);
             }
             case BIOME -> {
                 var biome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(

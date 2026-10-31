@@ -97,7 +97,13 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
             if (scenario.equals("server-stop")) {
                 try {
                     operation.handle((value, failure) -> null).get(10, java.util.concurrent.TimeUnit.SECONDS);
-                    service.shutdownDrain().toCompletableFuture().get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    try {
+                        service.shutdownDrain().toCompletableFuture().get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (java.util.concurrent.ExecutionException failure) {
+                        require(PublicationProbe.expectedPublishedShutdown()
+                                && failure.toString().contains("Shutdown interrupted finalization"),
+                                "Only the additional S5 published-stop fixture may fail this drain");
+                    }
                     require(service.pendingOperations() == 0, "Shutdown releases admitted producer operations");
                     require(operation.isCompletedExceptionally(), "Shutdown must fail the outstanding operation");
                     require(completionCount.get() == 1, "Shutdown completion delivered once");
@@ -259,6 +265,9 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
 
     @Override
     public CompletionStage<Reservation> prepare(PreparedChunkEdit proposal) {
+        if (PublicationProbe.owns(proposal)) {
+            return PublicationProbe.prepare(proposal);
+        }
         if (PreparationProbe.owns(proposal)) {
             return PreparationProbe.prepare(proposal);
         }

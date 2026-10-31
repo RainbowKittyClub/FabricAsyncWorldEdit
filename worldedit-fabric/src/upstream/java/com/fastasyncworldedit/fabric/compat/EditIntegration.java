@@ -12,7 +12,7 @@ import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
 import com.fastasyncworldedit.fabric.edit.PreparedChunkEdit;
 
-/** Version-one bridge contract; installed-but-unregistered integrations refuse coordinated edits. */
+/** Version-two bridge contract; installed-but-unregistered integrations refuse coordinated edits. */
 public interface EditIntegration {
 
     /** Stable provider identifier used by the required-integration policy. */
@@ -45,9 +45,15 @@ public interface EditIntegration {
 
         /**
          * Reconcile actual effects on the owner thread, including partial failures.
-         * The returned stage must cover all required maintenance and recipient-aware sends.
+         * Complete server metadata here; vanilla light completion and recipient sends follow.
+         * New watchers must remain deferred until publish is called.
          */
         public CompletionStage<Void> reconcile(ServerLevel level, CommitReceipt receipt);
+
+        /** Owner-thread watcher publication after vanilla light completion and per-recipient chunk sends. */
+        public default CompletionStage<Void> publish(ServerLevel level, CommitReceipt receipt) {
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }
 
         /** Off-thread awaited recording; acknowledgement means durable completion, not enqueue. */
         public CompletionStage<Void> record(CommitReceipt receipt);

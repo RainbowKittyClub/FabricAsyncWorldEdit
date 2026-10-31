@@ -151,7 +151,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     await expected(1030, 80, 1024, 'minecraft:chest[facing=north]')
     await expectInventory(1030, 'diamond', 3)
     await send(`op ${name}`)
-    if (extension) await extension.contract(rig, send, name)
+    if (extension) await extension.contract(rig, send, name, { client, edit, chatCommand, expected })
     const frame = await client.send({ action: 'capture' })
     if (frame.state !== 'world' || frame.differentPixels < 1000) throw new GateError('Empty native world frame')
     frame.sha256 = hash(frame.image)

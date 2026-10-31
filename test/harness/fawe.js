@@ -61,7 +61,7 @@ async function main () {
     return
   }
   if (positionals[0] !== 'run') throw new GateError('Use preflight or run; compare is not implemented', 2)
-  if (!['render-control', 'smoke', 's1-controls', 'contract', 's3', 's4'].includes(values.suite)) throw new GateError(`Required suite not implemented: ${values.suite}`, 2)
+  if (!['render-control', 'smoke', 's1-controls', 'contract', 's3', 's4', 's5', 's5-wna'].includes(values.suite)) throw new GateError(`Required suite not implemented: ${values.suite}`, 2)
   // The controls orchestrator starts only sequential child runners, each holding this lease.
   const lease = values.suite === 's1-controls' ? null : new SingleLaneLease()
   let rig
@@ -88,7 +88,8 @@ async function run (rig) {
     else if (values.suite === 's1-controls') await controls(rig, repo)
     else await smoke(rig, repo, values.workspace, values.profile, values.fault,
       values.suite === 'contract' ? require('./contract') : values.suite === 's3' ? require('./s3')
-        : values.suite === 's4' ? require('./s4') : undefined)
+        : values.suite === 's4' ? require('./s4') : values.suite === 's5' ? require('./s5')
+          : values.suite === 's5-wna' ? require('./s5-wna') : undefined)
   } catch (error) { failure = error } finally {
     try { await rig.close() } catch (error) { failure = error }
     for (const entry of rig.children) {
@@ -100,8 +101,10 @@ async function run (rig) {
     const result = { suite: values.suite, profile: values.profile, accepted: false,
       status: failure ? 'failed' : 'passed-subset', exitCode: failure?.code || (failure ? 1 : 0),
       error: failure?.message, results: rig.results, fixtureRoot: rig.root,
-      stagesComplete: failure ? [] : values.suite === 's4' ? ['S3', 'S4'] : values.suite === 's3' ? ['S3'] : [],
-      missing: [!failure && values.suite === 's4' ? 'S5-S15 backend, integrations and release acceptance'
+      stagesComplete: failure ? [] : values.suite === 's5' ? ['S3', 'S4', 'S5']
+        : values.suite === 's4' ? ['S3', 'S4'] : values.suite === 's3' ? ['S3'] : [],
+      missing: [!failure && values.suite === 's5' ? 'S6-S15 integrations and release acceptance'
+        : !failure && values.suite === 's4' ? 'S5-S15 backend, integrations and release acceptance'
         : !failure && values.suite === 's3' ? 'S4-S15 backend, integrations and release acceptance'
           : 'S3-S15 backend, integrations and release acceptance'] }
     writeJson(path.join(rig.root, 'results.json'), result)
