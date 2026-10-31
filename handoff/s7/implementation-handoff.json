@@ -42,7 +42,7 @@
       }
     ],
     "uncommittedAtHandoffWrite": false,
-    "commitNote": "Implementation commits are 5851347b9, bb5317951, aa3e8359b, dd1ad010e, b80fe3d4a, bf97d55e5, and daf1a43b1. Handoff-only commits b28c6e908, c7c1b0b6b, 04157a878, 709a63adb, 562bf6169, a1cf55daa, 7c4ffe442, bcd43688c, cc3f55fa9, 5fe93e05f, and 18e93d1ab record evidence; this metadata update is the final follow-up commit.",
+    "commitNote": "Implementation commits are 5851347b9, bb5317951, aa3e8359b, dd1ad010e, b80fe3d4a, bf97d55e5, and daf1a43b1. Handoff-only commits record evidence; this handoff is updated as the combined run and acceptance work continue.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
@@ -251,6 +251,8 @@
     "test/candidate-manifest.json and the test/manifest.json template now have a polymer profile: the FAWE candidate dist, lifecycle-probe testmod, fabric-api 0.162.0+26.3, and the accepted polymer-bundled 0.18.6-fawe-s7.1+26.3 bundle (e5251e9f...). The staged 0.18.5-rkc.4 entry is retained. No client pack artifact is pinned because Polymer auto-host generates and serves the pack at runtime.",
     "Combined success-path run is in flight in the Polymer session's test/bulk harness with white-list=false and -Dfawe.experimental.coordinated=true. Content is oak_log at 3200,80,3200, lit lamp at 3201,80,3200, and birch_log at 3202,80,3200. Phases: set stone, set oak_log (fresh holders), set stripped_oak_log (identity retention). `fawepublish stats` must show sections==3, fallbackWrites==0, relit>=3 and sent>=3, with no ERROR or mixin failures.",
     "The in-flight combined run pins archived FAWE dist b1dbb491 (built from 7c4ffe442) and testmod fd18d29e. Commit b80fe3d4a adds the REFUSED wording after that pin, so the refusal case needs a follow-up run against a dist that contains it; the success-path record remains valid for the pinned jar.",
+    "Native-driver command packets are parsed verbatim by ServerGamePacketListenerImpl.parseCommand in 26.3: vanilla literals are slash-less (`setblock`), WorldEdit/FAWE registers both `pos1` and `/pos1`, and `fawe-coordinated` is slash-less. Do not send `/setblock` or `/fawe-coordinated` through the native command action.",
+    "Fixture note: `redstone_lamp[lit=true]` with no neighbor signal schedules its own 4-tick extinguish in vanilla. A lamp reading that falls 14 -> 0 between snapshots is the block ticking, not FAWE or Polymer; power the lamp or use a stable light source when the fixture needs persistent light.",
     "The combined probe is not a full S7 acceptance run; it exercises the direct-section success path, holder lifecycle and identity retention with the installed accepted bundle."
   ],
   "residualGaps": [
