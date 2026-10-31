@@ -334,12 +334,15 @@ public final class FabricCommitCoordinator {
         ServerLevel level = null;
         try {
             if (failure != null) {
-                throw new IllegalStateException("Integration preparation failed", failure);
+                // Preserve the integration's refusal text (chunk/position plus reason) in the receipt.
+                throw new IllegalStateException("Integration preparation failed: "
+                        + (failure.getMessage() == null ? failure.toString() : failure.getMessage()), failure);
             }
             level = access.level(proposal.context().dimension());
             unit.level = level;
             if (quarantined.contains(chunkKey(proposal))) {
-                throw new IllegalStateException("Chunk is quarantined after a publication/finalization failure");
+                throw new IllegalStateException("Chunk " + proposal.chunkX() + "," + proposal.chunkZ()
+                        + " is quarantined after a publication/finalization failure");
             }
             if (proposal.context().cancellation().isCancelled() || stopped) {
                 outcome = CommitReceipt.Outcome.CANCELLED_BEFORE_WRITE;

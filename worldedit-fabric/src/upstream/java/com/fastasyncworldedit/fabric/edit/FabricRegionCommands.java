@@ -140,7 +140,16 @@ public final class FabricRegionCommands {
                     source.sendSuccess(() -> Component.literal("Coordinated edit complete: " + history.size()
                             + " changes (memory history; no neighbor callbacks)."), false);
                 } else {
-                    source.sendFailure(Component.literal("Coordinated edit failed after " + history.size() + " recorded changes: " + failure));
+                    // A refusal is clean only when no earlier unit recorded changes; otherwise report partial work.
+                    CommitReceipt refusal = history.size() == 0 ? preWriteRefusal(failure) : null;
+                    if (refusal != null) {
+                        source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
+                                + refusal.chunkX() + "," + refusal.chunkZ()
+                                + "; no changes were written: " + refusalReason(refusal)));
+                    } else {
+                        source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
+                                + " recorded changes: " + failure));
+                    }
                 }
             }));
             source.sendSuccess(() -> Component.literal("Coordinated edit admitted: " + operationId), false);
@@ -149,5 +158,34 @@ public final class FabricRegionCommands {
             source.sendFailure(Component.literal("Coordinated edit refused: " + failure.getMessage()));
             return 0;
         }
+    }
+
+    // Only an explicit pre-write failure is reported as a refusal; partial/post-write failures keep their wording.
+    private static CommitReceipt preWriteRefusal(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof FabricCommitCoordinator.CommitFailure commit) {
+                CommitReceipt receipt = commit.receipt();
+                if (isPreWriteRefusal(receipt)) return receipt;
+            }
+            if (current instanceof FabricEdits.OperationFailure operation) {
+                for (CommitReceipt receipt : operation.publishedReceipts()) {
+                    if (isPreWriteRefusal(receipt)) return receipt;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isPreWriteRefusal(CommitReceipt receipt) {
+        return receipt.outcome() == CommitReceipt.Outcome.FAILED_BEFORE_WRITE && receipt.applied().isEmpty();
+    }
+
+    // Keep the integration's chunk/position and reason, dropping exception/wrapper prefixes.
+    private static String refusalReason(CommitReceipt receipt) {
+        String text = receipt.failure();
+        int separator = text.indexOf(": ");
+        if (text.startsWith("java.") && separator >= 0) text = text.substring(separator + 2);
+        String wrapper = "Integration preparation failed: ";
+        return text.startsWith(wrapper) ? text.substring(wrapper.length()) : text;
     }
 }

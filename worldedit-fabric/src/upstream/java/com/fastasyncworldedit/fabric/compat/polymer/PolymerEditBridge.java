@@ -110,25 +110,29 @@ public final class PolymerEditBridge implements EditIntegration {
                         com.sk89q.worldedit.world.block.BlockState.get(delta.after().id())));
             }
             if (sections.isEmpty()) return;
+            BlockPos first = proposed.keySet().iterator().next();
+            String location = "chunk " + proposal.chunkX() + "," + proposal.chunkZ()
+                    + " at " + first.getX() + "," + first.getY() + "," + first.getZ();
             if (sections.size() > MAX_SECTIONS) {
-                throw new IllegalStateException("Polymer supports at most " + MAX_SECTIONS + " sections");
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
+                        + ": " + sections.size() + " sections exceed the limit of " + MAX_SECTIONS
+                        + "; no writes were made");
             }
             LevelChunk chunk = level.getChunkSource().getChunkNow(proposal.chunkX(), proposal.chunkZ());
             if (chunk == null || chunk.getPos().x() != proposal.chunkX()
                     || chunk.getPos().z() != proposal.chunkZ()) {
-                throw new IllegalStateException("Required chunk is not the current loaded instance");
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
+                        + ": the required chunk is not the current loaded instance; no writes were made");
             }
             this.level = level;
             try {
                 this.token = PolymerBulkEdits.prepare(chunk, Set.copyOf(sections), Map.copyOf(proposed));
             } catch (UnsupportedOperationException refused) {
-                throw new IllegalStateException("Polymer direct-section route refused for chunk "
-                        + proposal.chunkX() + "," + proposal.chunkZ()
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
                         + "; the chunk has an unsupported attachment or Immersive Portals and no writes "
                         + "were made: " + refused.getMessage(), refused);
             } catch (IllegalStateException refused) {
-                throw new IllegalStateException("Polymer direct-section route refused for chunk "
-                        + proposal.chunkX() + "," + proposal.chunkZ()
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
                         + "; the chunk is reserved/quarantined or no longer loaded, no writes were made, "
                         + "and unload/reload may be required: " + refused.getMessage(), refused);
             }
