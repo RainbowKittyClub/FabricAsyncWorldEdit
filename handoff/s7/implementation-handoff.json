@@ -81,6 +81,12 @@
     "acceptanceAccountingSha256": "c730fbc63b72b1ce0275d0ed74754a04b26da53eb7c7b27ccd57cdb5bab59716",
     "acceptanceRuntime": "handoff/s7-polymer/runtime-1793480857132.json",
     "acceptanceResult": "passed-subset; 0 log errors; lease released; two native 26.3 clients (pack + no-pack) each received 512/512 palette states, block light 14, chunk-with-light before new display spawn, retained IDs stable, disconnect/unload/rejoin/restart green",
+    "fixtureRevalidation": {
+      "runtime": "handoff/s7-polymer/runtime-1793484952292.json",
+      "sha256": "296ba974b805585f5278da14425a8b2b933d6c8d354aeeeb02fd69041af18b8d",
+      "status": "passed-subset",
+      "scope": "Polymer API proof after the additive manualattach fixture command; not full S7 or S12"
+    },
     "bundle": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/build/libs/polymer-bundled-0.18.6-fawe-s7.1+26.3.jar",
       "sha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838"
