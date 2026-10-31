@@ -39,15 +39,74 @@ function memory () {
   return { available: entries.MemAvailable, swapUsed: entries.SwapTotal - entries.SwapFree }
 }
 
-// Admit idle swap once per run; never move that run's baseline after admission.
-const RESOURCE_POLICY = Object.freeze({ admission: 'bounded-idle-samples',
-  sampleCount: 4, sampleIntervalMs: 250, admissionDeadlineMs: 3000,
-  minAvailableBytes: 8 * 1024 ** 3, maxSwapGrowthBytes: 0, maxConcurrentLanes: 1 })
+// Swap and cumulative PSI counters are telemetry, not evidence of current pressure.
+const RESOURCE_POLICY = Object.freeze({ version: 'pressure-aware-v2', admission: 'bounded-pressure-reserve',
+  sampleCount: 4, sampleIntervalMs: 250, admissionDeadlineMs: 3000, runtimeSampleIntervalMs: 100,
+  minAvailableBytes: 8 * 1024 ** 3, fullAvg10Percent: 1, someAvg10Percent: 5,
+  sustainedPressureMs: 3000, maxConcurrentLanes: 1,
+  telemetryOnly: ['swapUsed', 'pswpin', 'pswpout', 'pressure.some.total', 'pressure.full.total'] })
 
-function assertResources (current, initial = current) {
-  if (current.available < RESOURCE_POLICY.minAvailableBytes || current.swapUsed > initial.swapUsed) {
-    throw new GateError(`Resource admission refused: ${JSON.stringify({ current, initial, policy: RESOURCE_POLICY })}`, 2)
+function validateResources (current) {
+  const fields = { available: current?.available, swapUsed: current?.swapUsed,
+    pswpin: current?.pswpin, pswpout: current?.pswpout }
+  for (const kind of ['some', 'full']) {
+    fields[`pressure.${kind}.avg10`] = current?.pressure?.[kind]?.avg10
+    fields[`pressure.${kind}.total`] = current?.pressure?.[kind]?.total
   }
+  for (const [name, value] of Object.entries(fields)) {
+    if (!Number.isFinite(value) || value < 0 || (name.endsWith('.avg10') && value > 100)) {
+      throw new GateError(`Missing or invalid resource metric ${name}: ${String(value)}`, 2)
+    }
+  }
+}
+
+// One monotonic pressure window per run, shared by periodic and on-demand checks.
+class ResourceGuard {
+  constructor ({ now = () => performance.now() } = {}) {
+    this.now = now
+    this.pressureSince = null
+    this.sampleCount = 0
+  }
+
+  observe (current) {
+    validateResources(current)
+    const monotonicMs = this.now()
+    if (!Number.isFinite(monotonicMs) || (this.final && monotonicMs < this.final.monotonicMs)) {
+      throw new GateError('Missing or invalid monotonic resource clock', 2)
+    }
+    this.final = { ...structuredClone(current), monotonicMs }
+    this.initial ||= this.final
+    this.sampleCount++
+    const high = current.pressure.full.avg10 >= RESOURCE_POLICY.fullAvg10Percent ||
+      current.pressure.some.avg10 >= RESOURCE_POLICY.someAvg10Percent
+    if (high) this.pressureSince ??= monotonicMs
+    else this.pressureSince = null
+    const pressureDurationMs = high ? monotonicMs - this.pressureSince : 0
+    const reserveLow = current.available < RESOURCE_POLICY.minAvailableBytes
+    const sustained = pressureDurationMs >= RESOURCE_POLICY.sustainedPressureMs
+    return { high, pressureDurationMs, reserveLow, sustained }
+  }
+
+  check (current) {
+    const state = this.observe(current)
+    if (state.reserveLow || state.sustained) this.refuse(state)
+    return state
+  }
+
+  refuse (state) {
+    const reason = state.sustained ? 'Sustained memory pressure' : 'Available-memory reserve exhausted'
+    this.failure ||= { reason, ...state, sample: this.final }
+    throw new GateError(`${reason}: ${JSON.stringify(this.failure)}`, 2)
+  }
+
+  report () {
+    return { policy: RESOURCE_POLICY, initial: this.initial, final: this.final,
+      sampleCount: this.sampleCount, failure: this.failure }
+  }
+}
+
+function assertResources (current, guard = new ResourceGuard()) {
+  return guard.check(current)
 }
 
 function admissionSample () {
@@ -62,28 +121,20 @@ function admissionSample () {
 async function admitResources ({ sample = admissionSample, now = () => performance.now(),
   wait = ms => new Promise(resolve => setTimeout(resolve, ms)), samples = [] } = {}) {
   const started = now()
-  for (let i = 0; i < RESOURCE_POLICY.sampleCount; i++) {
+  const guard = new ResourceGuard({ now })
+  for (let i = 0; ; i++) {
     if (i) await wait(RESOURCE_POLICY.sampleIntervalMs)
-    if (now() - started >= RESOURCE_POLICY.admissionDeadlineMs) {
-      throw new GateError('Resource admission sampling deadline exceeded', 2)
-    }
     const current = sample()
     samples.push({ elapsedMs: now() - started, ...current })
+    const state = guard.observe(current)
+    if (state.sustained) guard.refuse(state)
     if (now() - started >= RESOURCE_POLICY.admissionDeadlineMs) {
-      throw new GateError('Resource admission sampling deadline exceeded', 2)
+      throw new GateError(`Resource admission deadline exceeded: ${JSON.stringify({ current, state })}`, 2)
     }
-    assertResources(current)
-    const first = samples[0]
-    const counters = [current.pswpin, current.pswpout, current.pressure?.some?.total, current.pressure?.full?.total]
-    if (counters.some(value => !Number.isFinite(value)) ||
-        ['some', 'full'].some(kind => current.pressure?.[kind]?.avg10 !== 0 ||
-          current.pressure[kind].total !== first.pressure[kind].total) ||
-        current.pswpin !== first.pswpin || current.pswpout !== first.pswpout || current.swapUsed !== first.swapUsed) {
-      throw new GateError(`Resource admission requires idle swap and pressure: ${JSON.stringify(samples)}`, 2)
+    if (i + 1 >= RESOURCE_POLICY.sampleCount && !state.reserveLow && !state.high) {
+      return Object.freeze({ initial: Object.freeze(structuredClone(current)), samples, policy: RESOURCE_POLICY })
     }
   }
-  return Object.freeze({ initial: Object.freeze({ available: samples.at(-1).available,
-    swapUsed: samples.at(-1).swapUsed }), samples, policy: RESOURCE_POLICY })
 }
 
 // Shared across worktrees and run roots. Stale leases fail closed; never reclaim another run.
@@ -123,6 +174,7 @@ class Rig {
     this.manifest = manifest
     this.admission = admission
     this.initialMemory = admission.initial
+    this.resourceGuard = new ResourceGuard()
     this.children = []
     this.tempDirs = []
     this.displays = []
@@ -137,10 +189,31 @@ class Rig {
       admission, initialResources: this.initialMemory, sourceManifestSha256: hash(manifestFile) })
     writeJson(path.join(this.root, 'resources-start.json'), this.initialMemory)
     this.assertResources()
+    this.resourceTimer = setInterval(() => this.monitorResources(), RESOURCE_POLICY.runtimeSampleIntervalMs)
+  }
+
+  monitorResources () {
+    try { this.assertResources() } catch (error) {
+      clearInterval(this.resourceTimer)
+      this.resourceFailure ||= error
+      // Display snapshots must still be verified in reverse order during close().
+      this.resourceStops = Promise.allSettled(this.children.toReversed()
+        .filter(entry => !this.displays.some(display => display.entry === entry))
+        .map(entry => this.stop(entry)))
+    }
   }
 
   assertResources () {
-    assertResources(memory(), this.initialMemory)
+    if (this.resourceFailure) throw this.resourceFailure
+    try { assertResources(admissionSample(), this.resourceGuard) } catch (error) {
+      this.resourceFailure = error
+      throw error
+    }
+  }
+
+  resourceReport () {
+    return { ...this.resourceGuard.report(), admission: this.admission,
+      error: this.resourceFailure?.message }
   }
 
   spawn (name, command, args, options = {}) {
@@ -233,7 +306,14 @@ class Rig {
   }
 
   async close () {
+    clearInterval(this.resourceTimer)
     const failures = []
+    if (this.resourceStops) {
+      for (const result of await this.resourceStops) {
+        if (result.status === 'rejected') failures.push(result.reason.message)
+      }
+    }
+    if (this.resourceFailure) failures.push(this.resourceFailure.message)
     const releaseDisplay = display => {
       try {
         display.close()
@@ -253,9 +333,15 @@ class Rig {
     if (!failures.length) {
       for (const dir of this.tempDirs) fs.rmSync(dir, { recursive: true })
     }
-    const finalResources = memory()
-    writeJson(path.join(this.root, 'resources-end.json'), finalResources)
-    try { assertResources(finalResources, this.initialMemory) } catch (error) { failures.push(error.message) }
+    try {
+      const finalResources = admissionSample()
+      writeJson(path.join(this.root, 'resources-end.json'), finalResources)
+      assertResources(finalResources, this.resourceGuard)
+    } catch (error) {
+      this.resourceFailure ||= error
+      failures.push(error.message)
+    }
+    writeJson(path.join(this.root, 'resources.json'), this.resourceReport())
     if (failures.length) throw new GateError(`Cleanup failed: ${failures.join('; ')}`, 3)
   }
 }
@@ -268,4 +354,4 @@ function tool (command, args, options = {}) {
 }
 
 module.exports = { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool,
-  RESOURCE_POLICY, admitResources, assertResources, SingleLaneLease, startTime }
+  RESOURCE_POLICY, ResourceGuard, admissionSample, admitResources, assertResources, SingleLaneLease, startTime }

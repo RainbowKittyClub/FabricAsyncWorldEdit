@@ -4,8 +4,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { parseArgs } = require('node:util')
-const { GateError, hash, json, writeJson, safeRoot, verify, memory, Rig, tool,
-  RESOURCE_POLICY, admitResources, assertResources, SingleLaneLease } = require('./rig')
+const { GateError, hash, json, writeJson, safeRoot, verify, Rig, tool,
+  RESOURCE_POLICY, admitResources, SingleLaneLease } = require('./rig')
 const { renderControl } = require('./native')
 const { smoke } = require('./smoke')
 const { controls } = require('./controls')
@@ -24,8 +24,6 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
 function preflight (manifest) {
   safeRoot(values.root)
   if (values.seed && Number(values.seed) !== manifest.seed) throw new GateError('Seed differs from pinned manifest', 3)
-  const resources = memory()
-  assertResources(resources)
   for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])
   for (const input of [...manifest.minecraft.libraries, ...manifest.loader.libraries]) verify(input)
   for (const [name, input] of Object.entries(manifest.helpers)) {
@@ -46,17 +44,16 @@ function preflight (manifest) {
     throw new GateError('Pinned software Vulkan ICD unavailable; invoke through test/flake.nix', 2)
   }
   if (!process.env.TMPDIR) throw new GateError('TMPDIR must name a writable private temporary root', 2)
-  return resources
 }
 
 function xml (text) { return String(text).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]) }
 
 async function main () {
   const manifest = json(values.manifest)
-  const resources = preflight(manifest)
+  preflight(manifest)
   if (positionals[0] === 'preflight') {
     const admission = await admitResources()
-    console.log(JSON.stringify({ status: 'capabilities-present-not-runtime-tested', resources, admission,
+    console.log(JSON.stringify({ status: 'capabilities-present-not-runtime-tested', resources: admission.initial, admission,
       resourcePolicy: RESOURCE_POLICY, manifest: values.manifest, incompleteProfiles: manifest.unavailableProfiles }))
     return
   }
@@ -99,6 +96,7 @@ async function run (rig) {
       }
     }
     const result = { suite: values.suite, profile: values.profile, accepted: false,
+      resourcePolicy: RESOURCE_POLICY, resources: rig.resourceReport(),
       status: failure ? 'failed' : 'passed-subset', exitCode: failure?.code || (failure ? 1 : 0),
       error: failure?.message, results: rig.results, fixtureRoot: rig.root,
       stagesComplete: failure ? [] : values.suite === 's5' ? ['S3', 'S4', 'S5']

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { DisplayLease } = require('./display')
-const { Rig, memory } = require('./rig')
+const { Rig } = require('./rig')
 
 function fixture (action) {
   const root = fs.mkdtempSync(path.join(process.env.TMPDIR, 'fawe-display-test-'))
@@ -69,7 +69,8 @@ test('nested displays verify in reverse child shutdown order', async () => {
     first.attach({ stopped: false })
     second.attach({ stopped: false })
     const rig = { root, children: [first.entry, second.entry], displays: [first, second],
-      ports: [], tempDirs: [], initialMemory: memory(),
+      ports: [], tempDirs: [], resourceGuard: { check () {}, report () { return {} } },
+      resourceReport: Rig.prototype.resourceReport,
       stop: async entry => {
         const display = entry === first.entry ? first : second
         // Simulate each owned Xvfb removing only its own mock socket at exit.
