@@ -119,7 +119,19 @@ public final class PolymerEditBridge implements EditIntegration {
                 throw new IllegalStateException("Required chunk is not the current loaded instance");
             }
             this.level = level;
-            this.token = PolymerBulkEdits.prepare(chunk, Set.copyOf(sections), Map.copyOf(proposed));
+            try {
+                this.token = PolymerBulkEdits.prepare(chunk, Set.copyOf(sections), Map.copyOf(proposed));
+            } catch (UnsupportedOperationException refused) {
+                throw new IllegalStateException("Polymer direct-section route refused for chunk "
+                        + proposal.chunkX() + "," + proposal.chunkZ()
+                        + "; the chunk has an unsupported attachment or Immersive Portals and no writes "
+                        + "were made: " + refused.getMessage(), refused);
+            } catch (IllegalStateException refused) {
+                throw new IllegalStateException("Polymer direct-section route refused for chunk "
+                        + proposal.chunkX() + "," + proposal.chunkZ()
+                        + "; the chunk is reserved/quarantined or no longer loaded, no writes were made, "
+                        + "and unload/reload may be required: " + refused.getMessage(), refused);
+            }
         }
 
         @Override
