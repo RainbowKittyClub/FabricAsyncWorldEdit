@@ -1512,7 +1512,7 @@
     },
     "candidate": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "b1f700d9a340a406982e9b59501b749014069bb0404386d6787c1b3a112f9752",
+      "sha256": "f20e43c1f6c8db0041632bd67de0d9542f2956e3c69611705c2e27142e15aefd",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",

@@ -33,7 +33,9 @@ public final class FabricWorldAccess {
     private static final Set<String> SUPPORTED_BLOCKS = Set.of(
             "minecraft:air", "minecraft:cave_air", "minecraft:void_air", "minecraft:stone",
             "minecraft:dirt", "minecraft:cobblestone", "minecraft:glass", "minecraft:glowstone",
-            "minecraft:oak_log", "minecraft:oak_planks", "minecraft:grass_block", "minecraft:water",
+            "minecraft:oak_log", "minecraft:birch_log", "minecraft:stripped_oak_log",
+            "minecraft:acacia_log", "minecraft:jungle_log", "minecraft:redstone_lamp",
+            "minecraft:oak_planks", "minecraft:grass_block", "minecraft:water",
             "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace",
             "minecraft:bell", "minecraft:lectern", "minecraft:gold_block", "minecraft:diamond_block");
     private final MinecraftServer server;
