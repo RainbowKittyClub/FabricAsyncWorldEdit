@@ -10,7 +10,7 @@
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
     "branch": "wf/fawe-fast-editing-20261029-s7",
     "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "head": "aa3e8359b71c554cbf8a0a55e01ef91c62c26087",
+    "head": "dd1ad010ef14bda548961fafda579587788c97d5",
     "newCommits": [
       {
         "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
@@ -23,10 +23,14 @@
       {
         "head": "aa3e8359b71c554cbf8a0a55e01ef91c62c26087",
         "subject": "fix(fabric): guard direct sections without polymer-core"
+      },
+      {
+        "head": "dd1ad010ef14bda548961fafda579587788c97d5",
+        "subject": "test(fabric): expose publication route stats"
       }
     ],
     "uncommittedAtHandoffWrite": false,
-    "commitNote": "Implementation commits are 5851347b9, bb5317951, and aa3e8359b. Handoff-only commits b28c6e908, c7c1b0b6b, and 04157a878 record evidence; this metadata update is the final follow-up commit.",
+    "commitNote": "Implementation commits are 5851347b9, bb5317951, aa3e8359b, and dd1ad010e. Handoff-only commits b28c6e908, c7c1b0b6b, 04157a878, 709a63adb, and 562bf6169 record evidence; this metadata update is the final follow-up commit.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
