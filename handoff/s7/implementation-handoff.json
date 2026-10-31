@@ -10,9 +10,15 @@
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
     "branch": "wf/fawe-fast-editing-20261029-s7",
     "base": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "head": "1bbed416abbb9d6d5c11da1c9b3278634c6edab3",
-    "newCommits": [],
+    "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
+    "newCommits": [
+      {
+        "head": "5851347b95ccc009e028c41c6ec29463a92f99f7",
+        "subject": "feat(fabric): consume Polymer bulk-edit reconciliation"
+      }
+    ],
     "uncommittedAtHandoffWrite": true,
+    "commitNote": "The implementation and initial handoff were committed as 5851347b9 after the handoff was written; this metadata update is a follow-up commit.",
     "modified": [
       "worldedit-fabric/build.gradle.kts",
       "worldedit-fabric/src/upstream/java/com/fastasyncworldedit/fabric/compat/EditIntegration.java",
