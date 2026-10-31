@@ -1,10 +1,10 @@
 {
   "stage": "S7",
   "run": "fawe-fast-editing-20261029-autonomous",
-  "status": "implemented-unaccepted",
+  "status": "implemented-pending-fawe-acceptance",
   "accepted": false,
   "completedStages": [],
-  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's candidate public bulk-edit API and added an explicit direct-section route discriminator. The Fabric module compiles, packages, and compiles the bridge against the real candidate polymer-common jar. No native S7 integration suite was run, and the Polymer API candidate is still unaccepted, so S7 is not complete.",
+  "summary": "Implemented the FAWE-side PolymerEditBridge against Polymer's now-accepted public bulk-edit API and added an explicit direct-section route discriminator. The Fabric module compiles, packages, and compiles the bridge against the exact polymer-common jar nested in the accepted Polymer bundle. No native FAWE S7 integration suite was run, so full S7 remains unaccepted.",
   "worktree": {
     "repository": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit",
     "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2",
@@ -41,15 +41,26 @@
     "headSubject": "feat(common): add owner-thread bulk-edit reconciliation API",
     "coordinates": "eu.pb4:polymer-<module>:0.18.6-fawe-s7.1+26.3",
     "published": false,
+    "polymerAcceptance": "accepted",
+    "acceptanceScope": "Polymer bulk-edit API proof, not full S7 or S12",
+    "acceptanceAccounting": "handoff/s7-polymer/acceptance-accounting.json",
+    "acceptanceRuntime": "handoff/s7-polymer/runtime-1793480857132.json",
+    "acceptanceResult": "passed-subset; 0 log errors; lease released; two native 26.3 clients (pack + no-pack) each received 512/512 palette states, block light 14, chunk-with-light before new display spawn, retained IDs stable, disconnect/unload/rejoin/restart green",
+    "bundle": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/build/libs/polymer-bundled-0.18.6-fawe-s7.1+26.3.jar",
+      "sha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838"
+    },
     "contract": "handoff/s7-polymer/api-contract.json",
-    "contractStatus": "candidate-not-accepted",
+    "contractStatus": "accepted; public surface unchanged from the candidate contract",
     "polymerHandoff": "handoff/s7-polymer/implementation-handoff.json",
-    "polymerHandoffStatus": "failed",
+    "polymerHandoffStatus": "stale-failed-snapshot; superseded by acceptance-accounting.json",
     "polymerHandoffPartComplete": false,
     "candidateCommonJar": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/polymer-common/build/libs/polymer-common-0.18.6-fawe-s7.1+26.3.jar",
       "sha256": "c4430f4783daee64bf8b229a3099eb226ac1f2778d5de413e0f3a44c76b7bd1f"
     },
+    "nestedCommonJarSha256": "c4430f4783daee64bf8b229a3099eb226ac1f2778d5de413e0f3a44c76b7bd1f",
+    "nestedCommonJarMatchesBuildJar": true,
     "sourceHashMatchesRecordedArchive": true,
     "recordedApiSourceSha256": "2418fc8b3200a7cd23f7fb76b255291f82373864b0682227e84fc89911b238ce"
   },
@@ -82,7 +93,7 @@
       "file": "worldedit-fabric/src/polymerstub/java/eu/pb4/polymer/common/api/PolymerBulkEdits.java",
       "state": "new",
       "sha256": "3e15bad9181ae53c14e689d4d69a1d27f1a0751617a486fff116e52769363e57",
-      "summary": "Compile-time signature mirror of the candidate public API. The mirror is a separate source set, never packaged, and not on the runtime classpath; real classes come from polymer-common at runtime."
+      "summary": "Compile-time signature mirror of the accepted public API. The mirror is a separate source set, never packaged, and not on the runtime classpath; real classes come from polymer-common at runtime."
     },
     {
       "file": "worldedit-fabric/build.gradle.kts",
@@ -116,9 +127,18 @@
     "warnings": "13 pre-existing deprecation/removal warnings; none from the changed Polymer/route files",
     "log": "/tmp/opencode/fawe-s7-build2.log",
     "realJarCompile": {
-      "command": "javac -cp <candidate polymer-common jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-real-compile PolymerEditBridge.java",
-      "result": "REAL-JAR COMPILE OK",
-      "meaning": "The bridge compiles against the real candidate API classes, not only the local signature mirror."
+      "command": "javac -cp <accepted bundle META-INF/jars/polymer-common-...jar>:<worldedit-fabric main classes>:<project compile classpath without polymerApiStub> -d /tmp/opencode/polymer-accepted-compile PolymerEditBridge.java",
+      "result": "ACCEPTED-BUNDLE COMPILE OK",
+      "meaning": "The bridge compiles against the exact common jar nested in the accepted bundle, not only the local signature mirror. The nested jar sha256 equals polymer-common/build/libs/...."
+    },
+    "acceptedBundleVerification": {
+      "bundleSha256": "e5251e9f23439809c32f68cebedd8eaae170c69e2803a00c7c708a5c565a8838",
+      "nestedCommonSha256": "c4430f4783daee64bf8b229a3099eb226ac1f2778d5de413e0f3a44c76b7bd1f",
+      "coreParticipant": "eu.pb4.polymer.core.impl.CoreBulkEdits",
+      "virtualEntityParticipant": "eu.pb4.polymer.virtualentity.impl.VirtualBulkEdits",
+      "entrypointKey": "polymer:bulk_edits",
+      "recheckCommand": "./gradlew -PfabricOnly=true --no-daemon --no-parallel :worldedit-fabric:compileJava",
+      "recheckResult": "BUILD SUCCESSFUL in 5s (up-to-date)"
     },
     "stubIsolation": {
       "compileOutput": "worldedit-fabric/build/classes/java/polymerApiStub/eu/pb4/polymer/common/api/PolymerBulkEdits*.class exists for compilation only",
@@ -141,26 +161,31 @@
       }
     ]
   },
+  "harnessNotes": [
+    "Minecraft 26.3 dedicated servers default white-list=true; non-op test clients must run with white-list=false (FAWE S6 smoke already sets this).",
+    "Polymer's accepted harness fixes were test-only: white-list=false and re-adding forceload after pendingreload so recorded holder IDs stay valid for the rejoin client."
+  ],
   "residualGaps": [
-    "The Polymer API candidate remains unaccepted. Its worktree now has a local commit a0ce5b32, but the Polymer handoff reports status failed with partComplete false, and no API artifact is published or release-approved.",
-    "No native S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route.",
-    "test/candidate-manifest.json still stages polymer-bundled 0.18.5-rkc.4, not the 0.18.6-fawe-s7.1 candidate, so the existing native harness would not test this API even if its display prerequisites were available.",
-    "The VE-without-polymer-core discovery combination is not covered. EditIntegrations loads the bridge only when polymer-core is installed, while polymer-common may be installed without core.",
+    "Full S7 remains unaccepted. The Polymer API part is accepted at a0ce5b32 (bundle e5251e9f...), but FAWE has no native S7 integration suite, no combined S7/earlier-stage regression, and no consumer adapters.",
+    "No native FAWE S7 integration suite ran. This environment lacks TMPDIR, VK_DRIVER_FILES, Xvfb, and xauth; the Gradle test task is NO-SOURCE and does not exercise the Polymer route.",
+    "test/candidate-manifest.json still stages polymer-bundled 0.18.5-rkc.4, not the accepted 0.18.6-fawe-s7.1 bundle, so the existing native harness would not test this API even if its display prerequisites were available.",
+    "Standalone polymer-common without polymer-core is unsupported: isModLoaded(\"polymer-core\") is false, so EditIntegrations keeps the bridge fail-closed. The accepted bundled distribution nests common and core as sibling jars, so the intended install loads the bridge.",
+    "Manual attachments and Immersive Portals make the VE participant throw UnsupportedOperationException from prepare. FAWE currently fails the unit before any write rather than falling back to the ordinary route; confirm whether fail-closed or a route retry is intended.",
     "If reading an actual after-value throws after a mutation, FAWE's receipt may under-report applied deltas. Polymer's token would still quarantine the chunk, but FAWE's own quarantine set might not learn about the changed chunk from an empty applied list.",
     "No FAWE-side negative-control, ordering, recipient, lighting, disconnect, or unload tests exist for this bridge. The coordinator and test probes were not extended for the Polymer route.",
     "Consumer-owned adapters (chests, portals, portable attachment/history codecs, diagonal walls, Terraform, shaded kalic0re data) remain separate work and are not implemented here.",
-    "The compile-time mirror is manual. Any accepted Polymer API signature or behavior change must be reconciled with src/polymerstub and the bridge before S7 acceptance.",
+    "The compile-time mirror is manual and currently matches the accepted API. Replace it with the real dependency once the accepted artifact is published or staged.",
     "Full S7 acceptance, combined S7 plus earlier-stage regressions, and S12 consumer/visual acceptance remain open."
   ],
   "notClaimed": [
     "S7 completion or acceptance",
-    "Polymer API stability or publication",
-    "Runtime behavior of the Polymer route on a native server/client",
+    "Maven publication, release approval, or deployment of the Polymer candidate",
+    "Runtime behavior of the FAWE Polymer route on a native server/client",
     "Any push, merge, release, deployment, or production use"
   ],
   "nextTasks": [
-    "Finish and review the Polymer API candidate, then publish or otherwise freeze an accepted contract and replace the compile-time mirror with the real dependency.",
-    "Extend the native harness with a polymer-core candidate profile and direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and VE/core-absent discovery.",
+    "Use the accepted a0ce5b32 API; when a Maven or staged artifact is available, replace the compile-time mirror with the real dependency and re-verify the bridge.",
+    "Extend the native harness with the accepted polymer-bundled 0.18.6-fawe-s7.1 profile and direct-section plus ordinary-route scenarios, including partial writes, finalization failure, lighting, recipient sends, disconnect, unload, and standalone-common discovery.",
     "Close the read-failure-after-mutation receipt/quarantine gap without weakening fail-closed behavior.",
     "Implement consumer-owned adapters in their own repositories, then run combined S7 and earlier-stage regressions and S12 consumer/visual acceptance."
   ]
