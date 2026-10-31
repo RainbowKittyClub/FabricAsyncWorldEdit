@@ -52,6 +52,7 @@ public class FabricEntity implements Entity {
 
     @Override
     public BaseEntity getState() {
+        com.fastasyncworldedit.fabric.compat.NativeClaims.unsupported("entity data reads");
         net.minecraft.world.entity.Entity entity = entityRef.get();
         if (entity == null) {
             return null;
@@ -104,6 +105,7 @@ public class FabricEntity implements Entity {
 
     @Override
     public boolean remove() {
+        com.fastasyncworldedit.fabric.compat.NativeClaims.unsupported("entity removal");
         net.minecraft.world.entity.Entity entity = entityRef.get();
         if (entity != null) {
             entity.remove(net.minecraft.world.entity.Entity.RemovalReason.KILLED);

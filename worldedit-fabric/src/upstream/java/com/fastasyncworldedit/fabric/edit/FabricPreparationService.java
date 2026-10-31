@@ -115,13 +115,20 @@ public final class FabricPreparationService {
                     long remaining = UNIT_BYTES - job.snapshots.values().stream()
                             .mapToLong(FabricGetBlocks::estimatedBytes).sum();
                     FabricGetBlocks snapshot = FabricGetBlocks.capture(access.level(job.context.dimension()),
-                            pos.x(), pos.z(), job.mapping, job.submitter.apply(job.snapshots), remaining);
+                            pos.x(), pos.z(), job.mapping, job.submitter.apply(job.snapshots), remaining, job.context);
                     job.snapshots.put(pos, snapshot);
                     snapshotsCaptured++;
                     captured = true;
                 }
                 if (job.snapshots.size() == job.positions.size()) {
                     check(job);
+                    for (var entry : job.snapshots.entrySet()) {
+                        if (entry.getValue().containsSensitiveData()) {
+                            com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(
+                                    access.level(job.context.dimension()), job.context,
+                                    entry.getKey().x(), entry.getKey().z());
+                        }
+                    }
                     Map<BlockVector2, FabricGetBlocks> detached = Map.copyOf(job.snapshots);
                     Consumer<Map<BlockVector2, FabricGetBlocks>> work = job.work;
                     job.running = true;

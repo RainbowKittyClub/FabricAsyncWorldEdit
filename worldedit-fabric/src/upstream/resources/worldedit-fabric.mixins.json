@@ -5,6 +5,7 @@
     "mixins": [
         "InvokerPlayerChunkSender",
         "MixinWnaOrdering",
+        "MixinClipboardProtection",
         "MixinBiomeEditRevision",
         "MixinBlockEntityEditRevision",
         "MixinChunkEditRevision",

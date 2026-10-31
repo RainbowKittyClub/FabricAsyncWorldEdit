@@ -1,0 +1,14 @@
+// Non-shipped claims probe; the production compile-only dependency is pinned in the version catalog.
+gradle.afterProject { project ->
+    if (project.path == ':worldedit-fabric') {
+        def probe = project.sourceSets.create('s6probe') {
+            java.srcDir new File(gradle.rootProject.projectDir, 'test/s6/java')
+            resources.srcDir new File(gradle.rootProject.projectDir, 'test/s6/resources')
+            compileClasspath += project.sourceSets.main.output + project.sourceSets.main.compileClasspath
+        }
+        project.tasks.register('s6probeJar', Jar) {
+            archiveClassifier.set('s6probe')
+            from probe.output
+        }
+    }
+}

@@ -98,6 +98,8 @@ public final class EditSessionBuilder {
     private final EventBus eventBus;
     private FaweLimit limit;
     private AbstractChangeSet changeSet;
+    private com.sk89q.worldedit.history.changeset.ChangeSet replayHistory;
+    private boolean replayRedo;
     private Region[] allowedRegions;
     private Region[] disallowedRegions;
     private Boolean fastMode;
@@ -293,6 +295,13 @@ public final class EditSessionBuilder {
         return setDirty();
     }
 
+    /** Supply historical provenance to opt-in platforms; actor remains the current operator. */
+    public EditSessionBuilder replay(com.sk89q.worldedit.history.changeset.ChangeSet history, boolean redo) {
+        this.replayHistory = java.util.Objects.requireNonNull(history);
+        this.replayRedo = redo;
+        return setDirty();
+    }
+
     /**
      * Do not process any history
      */
@@ -451,6 +460,12 @@ public final class EditSessionBuilder {
         if (actor == null && event.getActor() != null) {
             actor = event.getActor();
         }
+        if (WorldWrapper.unwrap(world) instanceof com.sk89q.worldedit.world.ActorBoundWorld bound) {
+            world = replayHistory == null ? bound.bindActor(actor)
+                    : bound.bindReplay(actor, replayHistory, replayRedo);
+            wnaMode = true;
+            combineStages = false;
+        }
         if (limit == null) {
             if (actor == null) {
                 limit = FaweLimit.MAX;
@@ -560,7 +575,9 @@ public final class EditSessionBuilder {
                     if (combineStages) {
                         this.extent = extent.enableHistory(changeSet);
                     } else {
-                        this.extent = new HistoryExtent(extent, changeSet);
+                        this.extent = world instanceof com.sk89q.worldedit.world.ActorBoundWorld bound
+                                ? bound.withCommittedHistory(extent, changeSet)
+                                : new HistoryExtent(extent, changeSet);
 //                        if (this.blockBag != null) {
 //                            this.extent = new BlockBagExtent(this.extent, blockBag, limit.INVENTORY_MODE == 1);
 //                        }

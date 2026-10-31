@@ -29,6 +29,18 @@ public interface EditIntegration {
      */
     public CompletionStage<Reservation> prepare(PreparedChunkEdit proposal);
 
+    /** Authorize a full chunk snapshot before any detached callback can observe its NBT. */
+    public default boolean authorizeSnapshot(ServerLevel level, ServerPlayer operator,
+            EditActorContext context, int chunkX, int chunkZ) {
+        return true;
+    }
+
+    /** Owner-thread direct WNA authorization; providers must explicitly support this route. */
+    public default boolean authorizeDirect(ServerLevel level, ServerPlayer operator,
+            EditActorContext context, EditDelta delta) {
+        throw new UnsupportedOperationException("Provider does not support direct WNA: " + id());
+    }
+
     /** Per-unit bridge state, retained through reconciliation and durable recording. */
     public interface Reservation {
 

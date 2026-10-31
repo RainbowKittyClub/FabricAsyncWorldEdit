@@ -168,12 +168,21 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
     /** Capture within an already reserved byte budget; reject oversized payloads before handoff. */
     public static FabricGetBlocks capture(ServerLevel level, int chunkX, int chunkZ,
             FabricStateMapping mapping, Submitter submitter, long byteBudget) {
+        return capture(level, chunkX, chunkZ, mapping, submitter, byteBudget, null);
+    }
+
+    /** Capture sensitive data only after authorizing the explicit current actor on the owner thread. */
+    public static FabricGetBlocks capture(ServerLevel level, int chunkX, int chunkZ,
+            FabricStateMapping mapping, Submitter submitter, long byteBudget, EditActorContext context) {
         if (!level.getServer().isSameThread()) {
             throw new IllegalStateException("Snapshot capture requires the server thread");
         }
         LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
         if (chunk == null) {
             throw new IllegalStateException("Snapshot chunk is not loaded");
+        }
+        if (!chunk.getBlockEntitiesPos().isEmpty()) {
+            com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, chunkX, chunkZ);
         }
         return new FabricGetBlocks(chunk, level, mapping, submitter, byteBudget);
     }
@@ -231,6 +240,11 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
     public BiomeType biomeValue(int x, int y, int z) {
         int index = ((y & 15) >> 2) << 4 | ((z & 15) >> 2) << 2 | ((x & 15) >> 2);
         return biomes[section(y)][index];
+    }
+
+    /** Whether handoff must recheck access after other chunks were captured on earlier ticks. */
+    public boolean containsSensitiveData() {
+        return !blockEntities.isEmpty();
     }
 
     /** Conservative retained-size estimate for admission accounting. */

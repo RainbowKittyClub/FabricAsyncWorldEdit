@@ -20,6 +20,15 @@
 package com.sk89q.worldedit.fabric;
 
 import com.fastasyncworldedit.core.nbt.FaweCompoundTag;
+import com.fastasyncworldedit.core.util.TaskManager;
+import com.fastasyncworldedit.fabric.compat.NativeClaims;
+import com.fastasyncworldedit.fabric.edit.CommitReceipt;
+import com.fastasyncworldedit.fabric.edit.FabricEdits;
+import com.fastasyncworldedit.fabric.edit.EditActorContext;
+import com.fastasyncworldedit.fabric.edit.EditDelta;
+import com.fastasyncworldedit.fabric.edit.EditValue;
+import com.fastasyncworldedit.fabric.edit.FrozenNbt;
+import com.fastasyncworldedit.fabric.edit.NativeHistoryExtent;
 import com.fastasyncworldedit.core.queue.IChunkGet;
 import com.fastasyncworldedit.core.queue.implementation.packet.ChunkPacket;
 import com.google.common.cache.CacheBuilder;
@@ -71,7 +80,6 @@ import com.sk89q.worldedit.world.item.ItemTypes;
 import com.sk89q.worldedit.world.weather.WeatherType;
 import com.sk89q.worldedit.world.weather.WeatherTypes;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
@@ -85,7 +93,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.Util;
-import net.minecraft.world.Clearable;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -95,13 +102,11 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
@@ -141,7 +146,7 @@ import static com.google.common.base.Preconditions.checkState;
 /**
  * An adapter to Minecraft worlds for WorldEdit.
  */
-public class FabricWorld extends AbstractWorld {
+public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.world.ActorBoundWorld {
 
     private static final RandomSource random = RandomSource.create();
 
@@ -155,6 +160,9 @@ public class FabricWorld extends AbstractWorld {
     private final WeakReference<Level> worldRef;
     private final String worldNameRef;
     private final FabricWorldNativeAccess worldNativeAccess;
+    private final EditActorContext editContext;
+    private java.util.function.Consumer<CommitReceipt> nativeHistory = receipt -> { };
+    private volatile CommitReceipt lastNativeReceipt;
 
     /**
      * Construct a new world.
@@ -162,7 +170,12 @@ public class FabricWorld extends AbstractWorld {
      * @param world the world
      */
     FabricWorld(Level world) {
+        this(world, null);
+    }
+
+    private FabricWorld(Level world, EditActorContext context) {
         checkNotNull(world);
+        this.editContext = context;
         this.worldRef = new WeakReference<>(world);
         LevelData levelData = world.getLevelData();
         this.worldNameRef = levelData instanceof ServerLevelData serverLevelData
@@ -184,6 +197,41 @@ public class FabricWorld extends AbstractWorld {
         } else {
             throw new RuntimeException("The reference to the world was lost (i.e. the world may have been unloaded)");
         }
+    }
+
+    @Override
+    public FabricWorld bindActor(com.sk89q.worldedit.extension.platform.Actor actor) {
+        EditActorContext context = actor == null ? null : new EditActorContext(actor.getUniqueId(),
+                actor.getName(), EditActorContext.Source.API, java.util.UUID.randomUUID(), null, null,
+                getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
+                new EditActorContext.Cancellation());
+        return new FabricWorld(getWorld(), context);
+    }
+
+    @Override
+    public FabricWorld bindReplay(com.sk89q.worldedit.extension.platform.Actor actor,
+            com.sk89q.worldedit.history.changeset.ChangeSet history, boolean redo) {
+        NativeHistoryExtent.Origin origin = NativeHistoryExtent.originOf(history);
+        EditActorContext context = actor == null ? null : new EditActorContext(actor.getUniqueId(),
+                actor.getName(), redo ? EditActorContext.Source.REDO : EditActorContext.Source.UNDO,
+                java.util.UUID.randomUUID(), origin.operationId(), origin.actorId(),
+                getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
+                new EditActorContext.Cancellation());
+        return new FabricWorld(getWorld(), context);
+    }
+
+    @Override
+    public Extent withCommittedHistory(Extent extent,
+            com.fastasyncworldedit.core.history.changeset.AbstractChangeSet history) {
+        NativeHistoryExtent committed = new NativeHistoryExtent(extent, history,
+                () -> nativeHistory = receipt -> { });
+        nativeHistory = committed::record;
+        return committed;
+    }
+
+    @Override
+    public void checkOperation(String operation) {
+        NativeClaims.unsupported(operation);
     }
 
     @Override
@@ -212,8 +260,17 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet sideEffects) throws WorldEditException {
-        clearContainerBlockContents(position);
-        return worldNativeAccess.setBlock(position, block, sideEffects);
+        return nativeWrite(EditDelta.Kind.BLOCK, position,
+                sideEffects.with(SideEffect.VALIDATION, SideEffect.State.OFF), () -> {
+                    BaseBlock target = block.toBaseBlock();
+                    if (sideEffects.shouldApply(SideEffect.VALIDATION)) {
+                        BlockState validated = FabricAdapter.adapt(worldNativeAccess.getValidBlockForPosition(
+                                FabricAdapter.adapt(target.toImmutableState()), FabricAdapter.toBlockPos(position)));
+                        target = validated.toBaseBlock(target.getNbtReference());
+                    }
+                    return new EditValue(target.toImmutableState().getAsString(), target.getNbt() == null
+                            ? null : FrozenNbt.capture(NBTConverter.toNative(target.getNbt())));
+                });
     }
 
     @Override
@@ -232,12 +289,22 @@ public class FabricWorld extends AbstractWorld {
     public boolean clearContainerBlockContents(BlockVector3 position) {
         checkNotNull(position);
 
-        BlockEntity tile = getWorld().getBlockEntity(FabricAdapter.toBlockPos(position));
-        if ((tile instanceof Clearable)) {
-            ((Clearable) tile).clearContent();
-            return true;
-        }
-        return false;
+        return nativeWrite(EditDelta.Kind.BLOCK, position, SideEffectSet.none(), () -> {
+            BlockPos pos = FabricAdapter.toBlockPos(position);
+            NativeClaims.snapshot((ServerLevel) getWorld(), editContext, pos.getX() >> 4, pos.getZ() >> 4);
+            EditValue before = nativeValue(pos);
+            if (before.nbt() == null) {
+                return before;
+            }
+            String id = FabricAdapter.adapt(getWorld().getBlockState(pos)).getBlockType().id();
+            if (!Set.of("minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
+                    "minecraft:furnace").contains(id)) {
+                throw new UnsupportedOperationException("No verified native inventory codec for " + id);
+            }
+            var cleared = before.nbt().thaw();
+            cleared.remove("Items");
+            return new EditValue(before.id(), FrozenNbt.capture(cleared));
+        });
     }
 
     @Override
@@ -262,19 +329,8 @@ public class FabricWorld extends AbstractWorld {
     @Override
     public boolean setBiome(int x, int y, int z, BiomeType biome) {
         checkNotNull(biome);
-        return com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
-            ChunkAccess chunk = getWorld().getChunk(x >> 4, z >> 4);
-            if (chunk instanceof com.fastasyncworldedit.fabric.edit.ChunkRevision revision) {
-                revision.worldedit$advanceEditRevision();
-            }
-            // The live biome palette uses quart cells, not block coordinates.
-            var biomeArray = (PalettedContainer<Holder<Biome>>) chunk.getSection(chunk.getSectionIndex(y)).getBiomes();
-            biomeArray.getAndSetUnchecked((x >> 2) & 3, (y >> 2) & 3, (z >> 2) & 3,
-                    getWorld().registryAccess().lookupOrThrow(Registries.BIOME)
-                            .getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.parse(biome.id()))));
-            chunk.markUnsaved();
-            return true;
-        });
+        return nativeWrite(EditDelta.Kind.BIOME, BlockVector3.at(x & ~3, y & ~3, z & ~3),
+                SideEffectSet.none(), () -> new EditValue(biome.id(), null));
     }
 
     private static final LoadingCache<ServerLevel, FabricFakePlayer> fakePlayers
@@ -282,6 +338,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public boolean useItem(BlockVector3 position, BaseItem item, Direction face) {
+        NativeClaims.unsupported("item callbacks");
         ItemStack stack = FabricAdapter.adapt(new BaseItemStack(item.getType(), item.getNbtReference(), 1));
         ServerLevel world = (ServerLevel) getWorld();
         final FabricFakePlayer fakePlayer;
@@ -310,6 +367,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public void dropItem(Vector3 position, BaseItemStack item) {
+        NativeClaims.unsupported("item entities");
         checkNotNull(position);
         checkNotNull(item);
 
@@ -324,6 +382,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public void simulateBlockMine(BlockVector3 position) {
+        NativeClaims.unsupported("simulated mining");
         BlockPos pos = FabricAdapter.toBlockPos(position);
         getWorld().destroyBlock(pos, true);
     }
@@ -335,6 +394,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public boolean regenerate(Region region, Extent extent, RegenOptions options) {
+        NativeClaims.unsupported("regeneration");
         // Don't even try to regen if it's going to fail.
         ChunkSource provider = getWorld().getChunkSource();
         if (!(provider instanceof ServerChunkCache)) {
@@ -667,18 +727,61 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public BaseBlock getFullBlock(BlockVector3 position) {
-        BlockPos pos = new BlockPos(position.x(), position.y(), position.z());
-        // Avoid creation by using the CHECK mode -- if it's needed, it'll be re-created anyways
-        BlockEntity tile = ((LevelChunk) getWorld().getChunk(pos)).getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+        return TaskManager.taskManager().sync(() -> {
+            BlockPos pos = FabricAdapter.toBlockPos(position);
+            if (getWorld().getBlockEntity(pos) != null) {
+                NativeClaims.snapshot((ServerLevel) getWorld(), editContext, position.x() >> 4, position.z() >> 4);
+            }
+            EditValue value = nativeValue(pos);
+            BlockState state = BlockState.get(value.id());
+            return value.nbt() == null ? state.toBaseBlock()
+                    : state.toBaseBlock(NBTConverter.fromNative(value.nbt().thaw()));
+        });
+    }
 
-        if (tile != null) {
-            var tagValueOutput = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, getWorld().registryAccess());
-            tile.saveWithId(tagValueOutput);
-            net.minecraft.nbt.CompoundTag tag = tagValueOutput.buildResult();
-            return getBlock(position).toBaseBlock(LazyReference.from(() -> NBTConverter.fromNative(tag)));
-        } else {
-            return getBlock(position).toBaseBlock();
+    /** Last immutable native result; a failed finalization is also retained here. */
+    public CommitReceipt lastNativeReceipt() {
+        return lastNativeReceipt;
+    }
+
+    // Synchronous WNA callers may wait only off-thread; owner callers must use the asynchronous API.
+    private boolean nativeWrite(EditDelta.Kind kind, BlockVector3 pos, SideEffectSet effects,
+            java.util.function.Supplier<EditValue> target) {
+        ServerLevel level = (ServerLevel) getWorld();
+        if (level.getServer().isSameThread()) {
+            throw new UnsupportedOperationException("Use the asynchronous FabricEdits API on the server thread");
         }
+        if (editContext == null) {
+            throw new UnsupportedOperationException("Native edits require a bound current actor");
+        }
+        boolean replay = editContext.source() == EditActorContext.Source.UNDO
+                || editContext.source() == EditActorContext.Source.REDO;
+        EditActorContext unit = new EditActorContext(editContext.actorId(), editContext.actorName(),
+                editContext.source(), java.util.UUID.randomUUID(),
+                replay ? editContext.parentId() : editContext.operationId(), editContext.originalActorId(),
+                editContext.dimension(), effects, editContext.cancellation(), editContext.operationId());
+        var completion = TaskManager.taskManager().sync(() -> FabricEdits.nativeService(level.getServer())
+                .submitNative(unit, kind, pos, target.get(), nativeHistory));
+        try {
+            CommitReceipt receipt = completion.toCompletableFuture().join();
+            lastNativeReceipt = receipt;
+            if (receipt.outcome() == CommitReceipt.Outcome.CONFLICT) {
+                throw new IllegalStateException("Native edit conflicted before publication");
+            }
+            return !receipt.applied().isEmpty();
+        } catch (java.util.concurrent.CompletionException failure) {
+            if (failure.getCause() instanceof com.fastasyncworldedit.fabric.edit.FabricCommitCoordinator.CommitFailure commit) {
+                lastNativeReceipt = commit.receipt();
+            }
+            throw failure;
+        }
+    }
+
+    // Only owner-thread mutation/history code sees this ungated before image.
+    private EditValue nativeValue(BlockPos pos) {
+        BlockEntity tile = getWorld().getBlockEntity(pos);
+        return new EditValue(FabricAdapter.adapt(getWorld().getBlockState(pos)).getAsString(), tile == null
+                ? null : FrozenNbt.capture(tile.saveWithFullMetadata(getWorld().registryAccess())));
     }
 
     @Override
@@ -701,6 +804,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public List<? extends Entity> getEntities(Region region) {
+        NativeClaims.unsupported("entity snapshots");
         final Level world = getWorld();
         AABB box = new AABB(
             FabricAdapter.toVec3(region.getMinimumPoint()),
@@ -718,6 +822,7 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public List<? extends Entity> getEntities() {
+        NativeClaims.unsupported("entity snapshots");
         final Level world = getWorld();
         if (!(world instanceof ServerLevel)) {
             return Collections.emptyList();
@@ -730,6 +835,7 @@ public class FabricWorld extends AbstractWorld {
     @Nullable
     @Override
     public Entity createEntity(Location location, BaseEntity entity) {
+        NativeClaims.unsupported("entity creation");
         ServerLevel world = (ServerLevel) getWorld();
         String entityId = entity.getType().id();
         final Optional<EntityType<?>> entityType = world.registryAccess().lookupOrThrow(Registries.ENTITY_TYPE).getOptional(Identifier.parse(entityId));
@@ -802,14 +908,9 @@ public class FabricWorld extends AbstractWorld {
 
     @Override
     public boolean tile(int x, int y, int z, FaweCompoundTag tile) throws WorldEditException {
-        return com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
-            BlockPos pos = new BlockPos(x, y, z);
-            boolean applied = worldNativeAccess.updateTileEntity(pos, tile.linTag());
-            if (applied) {
-                ((ServerLevel) getWorld()).getChunkSource().blockChanged(pos);
-            }
-            return applied;
-        });
+        return nativeWrite(EditDelta.Kind.BLOCK, BlockVector3.at(x, y, z), SideEffectSet.none(), () ->
+                new EditValue(FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString(),
+                        FrozenNbt.capture(NBTConverter.toNative(tile.linTag()))));
     }
 
     private static final class LiquidMask extends AbstractExtentMask {

@@ -13,15 +13,24 @@ import com.sk89q.worldedit.util.SideEffectSet;
  * @param actorName display name of the current operator
  * @param source operation entry point
  * @param operationId unique operation identity
- * @param parentId original operation for undo/replay, or null
+ * @param parentId original operation for undo/replay, enclosing operation for a child write, or null
  * @param originalActorId historical provenance only, or null
  * @param dimension dimension identifier
  * @param sideEffects requested vanilla side effects
  * @param cancellation shared, monotonic cancellation signal
+ * @param sessionId enclosing native edit session, distinct from historical replay provenance, or null
  */
 public record EditActorContext(UUID actorId, String actorName, Source source, UUID operationId,
         UUID parentId, UUID originalActorId, String dimension, SideEffectSet sideEffects,
-        Cancellation cancellation) {
+        Cancellation cancellation, UUID sessionId) {
+
+    /** Retains the coordinated API constructor; no enclosing native session is implied. */
+    public EditActorContext(UUID actorId, String actorName, Source source, UUID operationId,
+            UUID parentId, UUID originalActorId, String dimension, SideEffectSet sideEffects,
+            Cancellation cancellation) {
+        this(actorId, actorName, source, operationId, parentId, originalActorId, dimension,
+                sideEffects, cancellation, null);
+    }
 
     public EditActorContext {
         Objects.requireNonNull(actorId, "A current actor is required");

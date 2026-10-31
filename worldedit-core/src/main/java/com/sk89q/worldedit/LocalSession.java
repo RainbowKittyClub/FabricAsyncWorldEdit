@@ -682,6 +682,7 @@ public class LocalSession implements TextureHolder {
                     .fastMode(false)
                     .limitUnprocessed(actor)
                     .actor(actor);
+            builder.replay(changeSet, false);
             if (forceWna) {
                 builder.forceWNA();
             }
@@ -734,6 +735,7 @@ public class LocalSession implements TextureHolder {
                     .fastMode(false)
                     .limitUnprocessed(actor)
                     .actor(actor);
+            builder.replay(changeSet, true);
             if (forceWna) {
                 builder.forceWNA();
             }

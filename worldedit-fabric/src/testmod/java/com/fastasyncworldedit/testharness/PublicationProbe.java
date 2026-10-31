@@ -239,7 +239,7 @@ public final class PublicationProbe implements ModInitializer {
                 };
                 run.future = (run.kind.equals("retry") || run.kind.equals("nbt-retry") || run.kind.equals("nbt-aba")
                         ? service.submitRetrying(run.context, BlockVector2.at(run.cx, Z), run.history, edit)
-                        : service.submit(run.context, List.of(BlockVector2.at(run.cx, Z)), run.history, edit)).toCompletableFuture();
+                        : service.submitIndependent(run.context, List.of(BlockVector2.at(run.cx, Z)), run.history, edit)).toCompletableFuture();
                 run.future.whenComplete((value, failure) -> {
                     if (value != null) run.receipts = value;
                     Throwable cause = failure;

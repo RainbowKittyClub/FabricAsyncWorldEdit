@@ -128,6 +128,21 @@ public final class FabricWorldAccess {
                 || proposal.context().sideEffects().shouldApply(SideEffect.VALIDATION)) {
             throw new UnsupportedOperationException("Cross-cell callbacks require a declared write footprint");
         }
+        validatePayloads(proposal, level);
+    }
+
+    /** Validate the one-cell native path without substituting section-publication side effects. */
+    public void validateNative(PreparedChunkEdit proposal, ServerLevel level) {
+        owner();
+        if (proposal.writes().size() != 1
+                || proposal.context().sideEffects().shouldApply(SideEffect.VALIDATION)) {
+            throw new UnsupportedOperationException("Native targets must be validated before authorization");
+        }
+        validatePayloads(proposal, level);
+    }
+
+    // Both writers require the same payload/lifecycle capabilities before changing anything.
+    private void validatePayloads(PreparedChunkEdit proposal, ServerLevel level) {
         Set<String> cells = new HashSet<>();
         int heavy = 0;
         for (EditDelta delta : proposal.writes()) {
@@ -298,6 +313,37 @@ public final class FabricWorldAccess {
         owner();
         return Map.of("sections", installedSections, "fallbackWrites", fallbackWrites,
                 "relit", relitUnits, "sent", sentUnits, "maintenance", (long) maintenance.size());
+    }
+
+    /** Apply only the authorized cell through WNA; the coordinator captures even a throwing write. */
+    public void writeNative(ServerLevel level, EditDelta delta, SideEffectSet effects) {
+        owner();
+        if (delta.kind() == EditDelta.Kind.BIOME) {
+            write(level, delta, effects);
+            return;
+        }
+        if (delta.kind() != EditDelta.Kind.BLOCK) {
+            throw new UnsupportedOperationException("No native writer for " + delta.kind());
+        }
+        var nativeAccess = new com.sk89q.worldedit.fabric.internal.FabricWorldNativeAccess(
+                new java.lang.ref.WeakReference<>(level));
+        var state = com.sk89q.worldedit.world.block.BlockState.get(delta.after().id());
+        var block = delta.after().nbt() == null ? state.toBaseBlock() : state.toBaseBlock(
+                com.sk89q.worldedit.fabric.internal.NBTConverter.fromNative(delta.after().nbt().thaw()));
+        BlockPos pos = new BlockPos(delta.x(), delta.y(), delta.z());
+        try {
+            // Same-type state changes retain NBT; history replays tile data before block properties.
+            var tile = level.getBlockEntity(pos);
+            if (tile instanceof net.minecraft.world.Clearable clearable
+                    && level.getBlockState(pos).getBlock() != mapping.nativeState(delta.after().id()).getBlock()) {
+                clearable.clearContent();
+                tile.setChanged();
+            }
+            nativeAccess.setBlock(com.sk89q.worldedit.math.BlockVector3.at(delta.x(), delta.y(), delta.z()),
+                    block, effects);
+        } catch (com.sk89q.worldedit.WorldEditException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     /** Guarded vanilla fallback; callers must have validated and authorized this exact delta. */

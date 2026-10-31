@@ -15,6 +15,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     const input = rig.manifest.availableDependencies[key]
     fs.copyFileSync(verify(input), path.join(serverDir, 'mods', path.basename(input.path)))
   }
+  if (extension?.configureServer) await extension.configureServer(serverDir)
   const eula = fs.readFileSync(verify(rig.manifest.eula), 'utf8')
   if (!/^eula=true\s*$/m.test(eula)) throw new GateError('Existing authorized EULA configuration missing', 2)
   fs.writeFileSync(path.join(serverDir, 'eula.txt'), eula)
@@ -52,7 +53,16 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
       '-cp', classpath(rig.manifest, 'server'), 'net.fabricmc.loader.impl.launch.knot.KnotServer', 'nogui'],
     { cwd: serverDir })
     await rig.wait('reference server boot', () => fs.readFileSync(server.log, 'utf8').includes('Done ('), 180000, [server])
-    rcon = await Rcon.connect({ host: '127.0.0.1', port: config.rconPort, password: config.rconPassword })
+    await rig.wait('server RCON ready', async () => {
+      try {
+        rcon = await Rcon.connect({ host: '127.0.0.1', port: config.rconPort, password: config.rconPassword })
+        return true
+      } catch (error) {
+        if (error.code !== 'ECONNREFUSED') throw error
+        records.push({ startup: suffix, rconNotReady: error.code })
+        return false
+      }
+    }, 30000, [server])
     if (!/players online/.test(await send('list'))) throw new GateError('Reference server query failed')
     if (profile === 'base') await rig.wait(`lifecycle ${suffix}`, () =>
       fs.existsSync(path.join(rig.root, `lifecycle-${suffix}-running.json`)), 30000, [server])
@@ -76,6 +86,10 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
   const chatCommand = async (command, response) => {
     const offset = fs.statSync(client.entry.log).size
     await edit(command, () => response.test(fs.readFileSync(client.entry.log, 'utf8').slice(offset)))
+  }
+  const completedEdit = async (command, response, condition) => {
+    await chatCommand(command, response)
+    await rig.wait(`${command} authoritative result`, condition, 30000, [client.entry, server])
   }
   const inventory = (x, item, count) => async () =>
     (await send(`execute if data block ${x} 80 1024 Items[{Slot:0b,id:"minecraft:${item}",count:${count}}]`)) === 'Test passed. Count: 1'
@@ -109,11 +123,11 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     await send(`tp ${name} 1024 81 1024 0 45`)
     await edit('/pos1 1024,80,1024')
     await edit('/pos2 1025,80,1025')
-    await edit('/set stone', changed(1024, 'minecraft:stone'))
+    await completedEdit('/set stone', /Operation completed|blocks? (?:have been changed|changed)/, changed(1024, 'minecraft:stone'))
     for (const x of [1024, 1025]) for (const z of [1024, 1025]) await expected(x, 80, z, 'minecraft:stone')
-    await edit('/replace stone gold_block', changed(1024, 'minecraft:gold_block'))
-    await edit('undo', changed(1024, 'minecraft:stone'))
-    await edit('redo', changed(1024, 'minecraft:gold_block'))
+    await completedEdit('/replace stone gold_block', /blocks? (?:have been replaced|replaced)/, changed(1024, 'minecraft:gold_block'))
+    await completedEdit('undo', /Undid/, changed(1024, 'minecraft:stone'))
+    await completedEdit('redo', /Redid/, changed(1024, 'minecraft:gold_block'))
     await send('setblock 1030 80 1024 minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}')
     await send('setblock 1032 80 1024 minecraft:chest[facing=south]{Items:[{Slot:0b,id:"minecraft:emerald",count:2}]}')
     await expectInventory(1030, 'diamond', 3)
@@ -123,11 +137,11 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     await chatCommand('/pos2 1030,80,1024', /Second position set/)
     await chatCommand('/copy', /copied|1 blocks affected/i)
     await send(`tp ${name} 1032.5 80 1024.5 0 45`)
-    await edit('/paste', inventory(1032, 'diamond', 3))
+    await completedEdit('/paste', /clipboard has been pasted/, inventory(1032, 'diamond', 3))
     await expected(1032, 80, 1024, 'minecraft:chest[facing=north]')
-    await edit('undo', inventory(1032, 'emerald', 2))
+    await completedEdit('undo', /Undid/, inventory(1032, 'emerald', 2))
     await expected(1032, 80, 1024, 'minecraft:chest[facing=south]')
-    await edit('redo', inventory(1032, 'diamond', 3))
+    await completedEdit('redo', /Redid/, inventory(1032, 'diamond', 3))
     if (!(await client.send({ action: 'command-tree', command: '/set' })).visible) {
       throw new GateError('Operator cannot see //set')
     }

@@ -74,6 +74,21 @@ public final class FabricCommitCoordinator {
     /** Register a queue completion consumer before publication becomes eligible. */
     public synchronized CompletionStage<CommitReceipt> submitCommit(PreparedChunkEdit proposal,
             Function<CommitReceipt, CompletionStage<Void>> afterHistory) {
+        return submit(proposal, afterHistory, false);
+    }
+
+    /** Use the same admission, authorization, receipts and finalization for a single WNA mutation. */
+    public synchronized CompletionStage<CommitReceipt> submitNative(PreparedChunkEdit proposal) {
+        if (proposal.writes().size() != 1) {
+            throw new IllegalArgumentException("Native publication requires exactly one cell");
+        }
+        return submit(proposal, receipt -> CompletableFuture.completedFuture(null), true);
+    }
+
+    // Both backends reserve their lane and completion before detached preparation can run.
+    private CompletionStage<CommitReceipt> submit(PreparedChunkEdit proposal,
+            Function<CommitReceipt, CompletionStage<Void>> afterHistory,
+            boolean nativeMutation) {
         Objects.requireNonNull(afterHistory);
         Operation operation = operations.get(proposal.context().operationId());
         if (stopped || operation == null || operation.sealed || !operation.context.equals(proposal.context())) {
@@ -83,7 +98,7 @@ public final class FabricCommitCoordinator {
         if (pending.size() >= maxPending || bytes > maxBytes - retainedBytes) {
             throw new RejectedExecutionException("Bounded commit admission is full");
         }
-        Pending unit = new Pending(operation, proposal, bytes, afterHistory);
+        Pending unit = new Pending(operation, proposal, bytes, afterHistory, nativeMutation);
         pending.add(unit);
         retainedBytes += bytes;
         operation.units.add(unit.completion);
@@ -336,7 +351,11 @@ public final class FabricCommitCoordinator {
                 if (!access.matches(proposal, level)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
                 } else {
-                    access.validateSupported(proposal, level);
+                    if (!unit.nativeMutation) {
+                        access.validateSupported(proposal, level);
+                    } else {
+                        access.validateNative(proposal, level);
+                    }
                     for (EditDelta delta : proposal.writes()) {
                         EditValue before = access.read(level, delta);
                         EditDelta actual = new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(),
@@ -378,7 +397,11 @@ public final class FabricCommitCoordinator {
                             }
                         }
                         try {
-                            access.writeUnit(level, permitted, proposal.context().sideEffects());
+                            if (!unit.nativeMutation) {
+                                access.writeUnit(level, permitted, proposal.context().sideEffects());
+                            } else if (!permitted.isEmpty()) {
+                                access.writeNative(level, permitted.getFirst(), proposal.context().sideEffects());
+                            }
                         } finally {
                             for (EditDelta delta : permitted) {
                                 EditValue actualAfter = access.read(level, delta);
@@ -572,6 +595,7 @@ public final class FabricCommitCoordinator {
         private final PreparedChunkEdit proposal;
         private final long bytes;
         private final Function<CommitReceipt, CompletionStage<Void>> afterHistory;
+        private final boolean nativeMutation;
         private final CompletableFuture<CommitReceipt> completion = new CompletableFuture<>();
         private final CompletableFuture<Void> preparationDone = new CompletableFuture<>();
         private final CompletableFuture<Void> finalizationDone = new CompletableFuture<>();
@@ -586,11 +610,13 @@ public final class FabricCommitCoordinator {
 
         // Store immutable input and owned completion before it becomes visible to workers.
         private Pending(Operation operation, PreparedChunkEdit proposal, long bytes,
-                Function<CommitReceipt, CompletionStage<Void>> afterHistory) {
+                Function<CommitReceipt, CompletionStage<Void>> afterHistory,
+                boolean nativeMutation) {
             this.operation = operation;
             this.proposal = proposal;
             this.bytes = bytes;
             this.afterHistory = afterHistory;
+            this.nativeMutation = nativeMutation;
         }
     }
 }

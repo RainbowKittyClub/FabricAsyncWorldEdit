@@ -98,20 +98,82 @@ public final class FabricEdits {
 
     /** Select the coordinated API explicitly; an unavailable backend is never silently bypassed. */
     public static FabricEdits get(MinecraftServer server) {
-        if (active == null || active.server != server || active.stopped) {
+        if (!Boolean.getBoolean("fawe.experimental.coordinated")
+                || active == null || active.server != server || active.stopped) {
             throw new IllegalStateException("Enable -Dfawe.experimental.coordinated=true to use the experimental queue API");
         }
         return active;
     }
 
-    /** Admit a declared read footprint; callbacks run only after asynchronous loading and snapshots. */
+    /** Native writes use the same coordinator even when experimental section publication is off. */
+    public static FabricEdits nativeService(MinecraftServer server) {
+        if (!server.isSameThread() || server.isStopped()) {
+            throw new IllegalStateException("Native admission requires a running server owner thread");
+        }
+        if (active == null) {
+            active = new FabricEdits(server);
+        }
+        if (active.server != server || active.stopped) {
+            throw new IllegalStateException("Native edit service is unavailable");
+        }
+        return active;
+    }
+
+    /** Admit one explicit native cell; completion includes actual history and provider finalization. */
+    public CompletionStage<CommitReceipt> submitNative(EditActorContext context, EditDelta.Kind kind,
+            BlockVector3 pos, EditValue target, Consumer<CommitReceipt> history) {
+        owner();
+        Objects.requireNonNull(context, "Native writes require an explicitly bound actor");
+        Objects.requireNonNull(history);
+        var level = access.level(context.dimension());
+        // Full images may reach detached provider preparation only after sensitive-read authorization.
+        var chunk = level.getChunk(pos.x() >> 4, pos.z() >> 4);
+        if (kind == EditDelta.Kind.BLOCK && chunk.getBlockEntity(
+                new net.minecraft.core.BlockPos(pos.x(), pos.y(), pos.z())) != null) {
+            com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, pos.x() >> 4, pos.z() >> 4);
+        }
+        EditValue before = access.read(level, kind, pos.x(), pos.y(), pos.z(), "");
+        if (kind == EditDelta.Kind.BLOCK && target.nbt() == null && before.nbt() != null
+                && mapping.nativeState(before.id()).getBlock() == mapping.nativeState(target.id()).getBlock()) {
+            target = new EditValue(target.id(), before.nbt());
+        }
+        var dependency = new PreparedChunkEdit.ReadDependency(kind, pos.x(), pos.y(), pos.z(), "", before,
+                ((ChunkRevision) chunk).worldedit$editRevision());
+        var proposal = new PreparedChunkEdit(context, pos.x() >> 4, pos.z() >> 4, mapping.generation(),
+                List.of(dependency), List.of(new EditDelta(kind, pos.x(), pos.y(), pos.z(), "", before, target)));
+        var operation = coordinator.admit(context, receipt -> {
+            history.accept(receipt);
+            return CompletableFuture.completedFuture(null);
+        });
+        try {
+            CompletionStage<CommitReceipt> completion = coordinator.submitNative(proposal);
+            operation.seal();
+            return completion;
+        } catch (Throwable failure) {
+            operation.seal();
+            throw failure;
+        }
+    }
+
+    /** Legacy callbacks have unknown dependencies and are refused before snapshot exposure. */
+    @Deprecated
     public CompletionStage<List<CommitReceipt>> submit(EditActorContext context, List<BlockVector2> footprint,
             ChangeSet history, Consumer<SingleThreadQueueExtent> edit) {
         return submitUnits(context, List.of(new Unit(footprint, edit)), history);
     }
 
     /**
-     * Retry a repeatable single-destination callback at most twice after a zero-write conflict.
+     * Declare every write independent: clipping any cell must leave all other writes valid.
+     * Moves, swaps and callbacks relying on another write's success must not use this entry point.
+     */
+    public CompletionStage<List<CommitReceipt>> submitIndependent(EditActorContext context,
+            List<BlockVector2> footprint, ChangeSet history, Consumer<SingleThreadQueueExtent> edit) {
+        return submitUnits(context, List.of(Unit.independent(footprint, edit)), history);
+    }
+
+    /**
+     * Retry an independent single-destination callback at most twice after a zero-write conflict.
+     * Every cell must remain valid if another is denied; compound callbacks are unsupported.
      * The callback must be deterministic from its fresh snapshots and have no external effects.
      */
     public CompletionStage<List<CommitReceipt>> submitRetrying(EditActorContext context,
@@ -124,7 +186,7 @@ public final class FabricEdits {
     private CompletionStage<List<CommitReceipt>> retry(EditActorContext context, BlockVector2 destination,
             ChangeSet history, Consumer<SingleThreadQueueExtent> repeatable, int attempt) {
         CompletableFuture<List<CommitReceipt>> result = new CompletableFuture<>();
-        submit(context, List.of(destination), history, repeatable).whenComplete((receipts, failure) -> {
+        submitIndependent(context, List.of(destination), history, repeatable).whenComplete((receipts, failure) -> {
             if (failure != null) {
                 result.completeExceptionally(failure);
             } else if (attempt < 2 && receipts.size() == 1
@@ -156,11 +218,34 @@ public final class FabricEdits {
         return Map.copyOf(stats);
     }
 
-    /** One detached chunk callback, with all destination and neighbor reads declared in advance. */
-    public record Unit(List<BlockVector2> footprint, Consumer<SingleThreadQueueExtent> edit) {
+    /** Declared semantics, never inferred from matching block values or callback output. */
+    public enum Semantics {
+        UNSPECIFIED, INDEPENDENT, MOVE, COMPOUND, REGENERATION
+    }
+
+    /**
+     * One detached callback with its declared dependencies.
+     *
+     * @param footprint every destination and neighbor read chunk
+     * @param edit detached work; no external effects or live-world mutation
+     * @param semantics independent cells may be clipped separately; all other semantics are refused
+     */
+    public record Unit(List<BlockVector2> footprint, Consumer<SingleThreadQueueExtent> edit, Semantics semantics) {
+        /** Legacy callbacks must migrate to an explicit declaration before they can run. */
+        @Deprecated
+        public Unit(List<BlockVector2> footprint, Consumer<SingleThreadQueueExtent> edit) {
+            this(footprint, edit, Semantics.UNSPECIFIED);
+        }
+
+        /** Declare that denying any write cannot invalidate or destroy another write's source. */
+        public static Unit independent(List<BlockVector2> footprint, Consumer<SingleThreadQueueExtent> edit) {
+            return new Unit(footprint, edit, Semantics.INDEPENDENT);
+        }
+
         public Unit {
             footprint = List.copyOf(footprint);
             Objects.requireNonNull(edit);
+            Objects.requireNonNull(semantics);
             if (footprint.isEmpty() || footprint.size() > 4
                     || footprint.stream().distinct().count() != footprint.size()) {
                 throw new IllegalArgumentException("Unit requires one to four distinct read chunks");
@@ -177,6 +262,11 @@ public final class FabricEdits {
             throw new UnsupportedOperationException("Durable histories need an acknowledgement adapter");
         }
         List<Unit> requests = List.copyOf(units);
+        for (Unit unit : requests) {
+            if (unit.semantics() != Semantics.INDEPENDENT) {
+                throw new UnsupportedOperationException("No compound publication contract for " + unit.semantics());
+            }
+        }
         if (stopped || admitted.size() >= 8 || requests.isEmpty() || requests.size() > 64) {
             throw new IllegalArgumentException("Operation admission is closed, full or exceeds 64 units");
         }

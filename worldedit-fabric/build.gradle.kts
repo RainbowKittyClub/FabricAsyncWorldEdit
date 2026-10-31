@@ -58,6 +58,11 @@ loom {
 }
 
 repositories {
+    maven {
+        name = "Modrinth"
+        url = uri("https://api.modrinth.com/maven/")
+        content { includeGroup("maven.modrinth") }
+    }
     // Loom adds project repositories, which take precedence over the settings repositories.
     maven {
         name = "EngineHub Repository"
@@ -95,6 +100,7 @@ dependencies {
         "include"(dep)
         "implementation"(dep)
     }
+    "compileOnly"(libs.opac) { isTransitive = false }
     "compileOnly"(libs.fabric.permissions.api)
     "compileOnly"(libs.errorprone.annotations)
 }

@@ -283,7 +283,7 @@ public final class PreparationProbe implements ModInitializer {
                                 BlockVector2.at(cx + 2, BASE_Z), BlockVector2.at(cx + 3, BASE_Z))
                         : neighbor ? List.of(BlockVector2.at(cx, BASE_Z), BlockVector2.at(cx + 1, BASE_Z))
                         : List.of(BlockVector2.at(cx, BASE_Z));
-                units.add(new FabricEdits.Unit(footprint, queue -> {
+                units.add(FabricEdits.Unit.independent(footprint, queue -> {
                     require(!com.fastasyncworldedit.core.Fawe.isMainThread(), "Filter executed on owner thread");
                     workersEntered.incrementAndGet();
                     startedOrder.add(label);
@@ -359,7 +359,7 @@ public final class PreparationProbe implements ModInitializer {
         }
         if (selected.equals("saturation")) {
             try {
-                service.submit(current.getFirst().context, List.of(BlockVector2.at(baseX, BASE_Z)),
+                service.submitIndependent(current.getFirst().context, List.of(BlockVector2.at(baseX, BASE_Z)),
                         new ArrayListHistory(), queue -> { });
                 throw new AssertionError("Ninth operation escaped admission budget");
             } catch (IllegalArgumentException expected) { }

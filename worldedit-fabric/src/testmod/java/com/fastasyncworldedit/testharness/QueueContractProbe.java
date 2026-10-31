@@ -202,7 +202,7 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
                 ? List.of(BlockVector2.at(63, 64))
                 : List.of(BlockVector2.at(65, 64), BlockVector2.at(64, 64), BlockVector2.at(65, 65));
         service = FabricEdits.get(server);
-        operation = service.submit(context, footprint, history, extent -> {
+        operation = service.submitIndependent(context, footprint, history, extent -> {
                     queue = extent;
                     extent.setProcessor(new Processor(false));
                     extent.setPostProcessor(new Processor(true));
@@ -271,6 +271,9 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
         if (PreparationProbe.owns(proposal)) {
             return PreparationProbe.prepare(proposal);
         }
+        if (context == null || !proposal.context().operationId().equals(context.operationId())) {
+            return CompletableFuture.completedFuture(new Unobserved());
+        }
         require(proposal.context().equals(context), "Production adapter carries the explicit admitted context");
         prepared.incrementAndGet();
         require(!Fawe.isMainThread(), "Preparation is detached");
@@ -299,6 +302,28 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
             @Override
             public void discard() { closed.incrementAndGet(); }
         });
+    }
+
+    // Ordinary WNA operations share the coordinator but are outside this fixture's barriers.
+    private static final class Unobserved implements Reservation {
+        @Override
+        public boolean authorize(ServerLevel level, ServerPlayer player, EditActorContext context, EditDelta delta) {
+            return true;
+        }
+        @Override
+        public void beforePublication(ServerLevel level, List<EditDelta> changes) { }
+        @Override
+        public CompletionStage<Void> reconcile(ServerLevel level, CommitReceipt receipt) {
+            return CompletableFuture.completedFuture(null);
+        }
+        @Override
+        public CompletionStage<Void> record(CommitReceipt receipt) {
+            return CompletableFuture.completedFuture(null);
+        }
+        @Override
+        public void close(ServerLevel level) { }
+        @Override
+        public void discard() { }
     }
 
     // Upstream processors must affect the set actually dispatched by ChunkHolder.call.

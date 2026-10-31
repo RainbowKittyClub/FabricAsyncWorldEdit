@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "fawe_s6_probe",
+  "version": "1.0.0",
+  "name": "FAWE S6 isolated OPAC probe",
+  "environment": "server",
+  "mixins": ["fawe-s6.mixins.json"],
+  "entrypoints": {
+    "main": ["com.fastasyncworldedit.s6.ClaimsProbe"],
+    "fawe:edit_integration": ["com.fastasyncworldedit.s6.ClaimsProbe"]
+  },
+  "depends": {
+    "minecraft": "26.3",
+    "worldedit": "*",
+    "openpartiesandclaims": "0.33.0",
+    "fabric-permissions-api-v0": "*"
+  }
+}

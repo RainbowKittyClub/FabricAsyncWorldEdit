@@ -398,14 +398,16 @@ public class AbstractDelegateExtent implements Extent {
         if (extent instanceof HistoryExtent) {
             HistoryExtent history = ((HistoryExtent) extent);
             if (changeSet == null) {
-                new ExtentTraverser(this).setNext(history.getExtent());
+                new ExtentTraverser(this).setNext(history.disableHistory());
             } else {
                 history.setChangeSet(changeSet);
             }
         } else if (extent instanceof AbstractDelegateExtent) {
             ((AbstractDelegateExtent) extent).setChangeSet(changeSet);
         } else if (changeSet != null) {
-            new ExtentTraverser<>(this).setNext(new HistoryExtent(extent, changeSet));
+            Extent history = extent instanceof com.sk89q.worldedit.world.ActorBoundWorld bound
+                    ? bound.withCommittedHistory(extent, changeSet) : new HistoryExtent(extent, changeSet);
+            new ExtentTraverser<Extent>(this).setNext(history);
         }
     }
     //FAWE end

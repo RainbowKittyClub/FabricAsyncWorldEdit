@@ -119,7 +119,8 @@ public abstract class AbstractChangeSet implements ChangeSet, IBatchProcessor {
 
     @Override
     public Extent construct(Extent child) {
-        return new HistoryExtent(child, this);
+        return child instanceof com.sk89q.worldedit.world.ActorBoundWorld bound
+                ? bound.withCommittedHistory(child, this) : new HistoryExtent(child, this);
     }
 
     @Override
