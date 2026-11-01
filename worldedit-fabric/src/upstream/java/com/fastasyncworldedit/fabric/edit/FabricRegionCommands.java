@@ -184,8 +184,10 @@ public final class FabricRegionCommands {
     private static String refusalReason(CommitReceipt receipt) {
         String text = receipt.failure();
         int separator = text.indexOf(": ");
-        if (text.startsWith("java.") && separator >= 0) text = text.substring(separator + 2);
-        String wrapper = "Integration preparation failed: ";
+        if (separator > 0 && text.substring(0, separator).chars().noneMatch(Character::isWhitespace)) {
+            text = text.substring(separator + 2);
+        }
+        String wrapper = FabricCommitCoordinator.INTEGRATION_REFUSAL_PREFIX;
         return text.startsWith(wrapper) ? text.substring(wrapper.length()) : text;
     }
 }

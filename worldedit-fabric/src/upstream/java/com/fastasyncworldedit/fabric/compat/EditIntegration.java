@@ -55,6 +55,12 @@ public interface EditIntegration {
         /**
          * Owner-thread prepublication scope, including deferred watcher publication if needed.
          * Providers that only care about the route-aware hook may leave this empty.
+         *
+         * <p>Retained only for providers that predate the route-aware hook: the coordinator
+         * invokes the three-argument form exclusively. Providers that acquire route-scoped state
+         * (for example a loaded-chunk token) MUST implement the three-argument form and SHOULD
+         * make this legacy form fail fast, because a call here would otherwise skip acquisition
+         * silently and leave reconciliation a no-op.
          */
         public default void beforePublication(ServerLevel level, List<EditDelta> authorized) {
         }
@@ -70,10 +76,11 @@ public interface EditIntegration {
         }
 
         /**
-         * Route-aware prepublication scope. {@code directSections} is true only when every
-         * authorized delta will be published by replacing whole sections and no ordinary cell
-         * write will occur in this proposal. Providers that only need the legacy hook keep
-         * their existing two-argument implementation.
+         * Route-aware prepublication scope; this is the only prepublication hook the coordinator
+         * invokes. {@code directSections} is true only when every authorized delta will be
+         * published by replacing whole sections and no ordinary cell write will occur in this
+         * proposal. Providers that only need the legacy hook keep their existing two-argument
+         * implementation, which the default below delegates to.
          */
         public default void beforePublication(ServerLevel level, List<EditDelta> authorized,
                 boolean directSections) {

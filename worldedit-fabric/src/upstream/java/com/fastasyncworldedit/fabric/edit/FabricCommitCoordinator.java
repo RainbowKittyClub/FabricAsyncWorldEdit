@@ -21,6 +21,9 @@ import com.fastasyncworldedit.fabric.compat.EditIntegrations;
 
 /** Bounded, owner-thread publication with explicit receipts and nonblocking finalization. */
 public final class FabricCommitCoordinator {
+    /** Receipt prefix preserved so pre-write integration refusals keep their chunk/position reason. */
+    public static final String INTEGRATION_REFUSAL_PREFIX = "Integration preparation failed: ";
+
     private final MinecraftServer server;
     private final FabricWorldAccess access;
     private final List<EditIntegration> integrations;
@@ -335,7 +338,7 @@ public final class FabricCommitCoordinator {
         try {
             if (failure != null) {
                 // Preserve the integration's refusal text (chunk/position plus reason) in the receipt.
-                throw new IllegalStateException("Integration preparation failed: "
+                throw new IllegalStateException(INTEGRATION_REFUSAL_PREFIX
                         + (failure.getMessage() == null ? failure.toString() : failure.getMessage()), failure);
             }
             level = access.level(proposal.context().dimension());
@@ -379,45 +382,57 @@ public final class FabricCommitCoordinator {
                         }
                     }
                     List<EditDelta> finalAuthorized = List.copyOf(authorized);
-                    boolean directSections = !unit.nativeMutation
-                            && EditIntegrations.directSectionRouteSupported()
-                            && access.directSectionEligible(level, finalAuthorized);
-                    if (directSections) {
+                    // Re-authorize the full set before any provider token is acquired so the reserved
+                    // proposal exactly matches the set that will be written; publication is
+                    // non-yielding, so this equals the previous per-group re-check.
+                    List<EditDelta> writeSet = new ArrayList<>();
+                    for (EditDelta delta : finalAuthorized) {
+                        boolean stillAllowed = !proposal.context().cancellation().isCancelled()
+                                && FabricRegionCommands.authorized(proposal.context(), player);
                         for (EditIntegration.Reservation reservation : unit.reservations) {
-                            directSections &= reservation.allowsDirectSections(level, finalAuthorized);
+                            stillAllowed &= reservation.authorize(level, player, proposal.context(), delta);
+                        }
+                        if (stillAllowed) {
+                            writeSet.add(delta);
+                        } else {
+                            denied++;
                         }
                     }
+                    List<EditDelta> finalWrite = List.copyOf(writeSet);
+                    // The route is proposal-wide only while a provider holds section-scoped state: a
+                    // live token forbids mixing ordinary writes, so every group must go direct.
+                    // Without such a provider, writeUnit selects the route per publication unit.
+                    boolean directSections = !unit.nativeMutation
+                            && EditIntegrations.directSectionRouteSupported()
+                            && access.directSectionEligible(level, finalWrite);
+                    if (directSections) {
+                        for (EditIntegration.Reservation reservation : unit.reservations) {
+                            directSections &= reservation.allowsDirectSections(level, finalWrite);
+                        }
+                    }
+                    boolean groupRoute = !directSections
+                            && EditIntegrations.bulkInstallWithoutTokenSupported();
                     for (EditIntegration.Reservation reservation : unit.reservations) {
-                        reservation.beforePublication(level, finalAuthorized, directSections);
+                        reservation.beforePublication(level, finalWrite, directSections);
                     }
                     if (!access.matches(proposal, level)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
                     }
-                    for (List<EditDelta> group : access.publicationUnits(authorized)) {
-                        List<EditDelta> permitted = new ArrayList<>();
+                    for (List<EditDelta> group : access.publicationUnits(writeSet)) {
                         for (EditDelta delta : group) {
-                            boolean stillAllowed = !proposal.context().cancellation().isCancelled()
-                                    && FabricRegionCommands.authorized(proposal.context(), player);
-                            for (EditIntegration.Reservation reservation : unit.reservations) {
-                                stillAllowed &= reservation.authorize(level, player, proposal.context(), delta);
-                            }
-                            if (stillAllowed) permitted.add(delta);
-                            else denied++;
-                        }
-                        for (EditDelta delta : permitted) {
                             if (!Objects.equals(access.read(level, delta), delta.before())) {
                                 throw new IllegalStateException("Authorization changed an intended before-value");
                             }
                         }
                         try {
                             if (!unit.nativeMutation) {
-                                access.writeUnit(level, permitted, proposal.context().sideEffects(),
-                                        directSections);
-                            } else if (!permitted.isEmpty()) {
-                                access.writeNative(level, permitted.getFirst(), proposal.context().sideEffects());
+                                access.writeUnit(level, group, proposal.context().sideEffects(),
+                                        directSections, groupRoute);
+                            } else if (!group.isEmpty()) {
+                                access.writeNative(level, group.getFirst(), proposal.context().sideEffects());
                             }
                         } finally {
-                            for (EditDelta delta : permitted) {
+                            for (EditDelta delta : group) {
                                 EditValue actualAfter = access.read(level, delta);
                                 if (!Objects.equals(delta.before(), actualAfter)) {
                                     applied.add(new CommitReceipt.AppliedDelta(unit.operation.sequence++,

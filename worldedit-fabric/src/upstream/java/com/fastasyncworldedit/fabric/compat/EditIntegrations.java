@@ -10,9 +10,13 @@ import net.fabricmc.loader.api.FabricLoader;
 
 /** Fail-closed optional-provider discovery; each integration owns only its implementation package. */
 public final class EditIntegrations {
+    // Polymer mod ids; POLYMER_CORE is also the PROVIDERS registration key and every route
+    // predicate below must stay in sync with it.
+    private static final String POLYMER_CORE = "polymer-core";
+    private static final String POLYMER_VIRTUAL_ENTITY = "polymer-virtual-entity";
     private static final Map<String, String> PROVIDERS = Map.of(
             "openpartiesandclaims", "com.fastasyncworldedit.fabric.compat.opac.OpacAuthorizer",
-            "polymer-core", "com.fastasyncworldedit.fabric.compat.polymer.PolymerEditBridge",
+            POLYMER_CORE, "com.fastasyncworldedit.fabric.compat.polymer.PolymerEditBridge",
             "ledger", "com.fastasyncworldedit.fabric.compat.ledger.LedgerEditBridge");
 
     // No mutable global registration surface survives server restarts.
@@ -29,7 +33,18 @@ public final class EditIntegrations {
      */
     public static boolean directSectionRouteSupported() {
         FabricLoader loader = FabricLoader.getInstance();
-        return !loader.isModLoaded("polymer-virtual-entity") || loader.isModLoaded("polymer-core");
+        return !loader.isModLoaded(POLYMER_VIRTUAL_ENTITY) || loader.isModLoaded(POLYMER_CORE);
+    }
+
+    /**
+     * Whether whole-section installs may bypass vanilla block-change hooks without a live provider
+     * token. True only when no mod can own block-bound holders (polymer-virtual-entity is absent).
+     * The coordinator may then bulk-install eligible publication units even when the
+     * proposal-wide route was vetoed, restoring the pre-S7 per-group behaviour; when any
+     * holder-owning mod is installed, a live token (or the ordinary route) must keep them in sync.
+     */
+    public static boolean bulkInstallWithoutTokenSupported() {
+        return !FabricLoader.getInstance().isModLoaded(POLYMER_VIRTUAL_ENTITY);
     }
 
     /** Load only providers for installed mods; initialization failure is never absence. */

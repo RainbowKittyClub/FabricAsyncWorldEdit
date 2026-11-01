@@ -263,10 +263,13 @@ public final class FabricWorldAccess {
      *
      * @param directSections true only when {@link #directSectionEligible} approved the proposal.
      *        The strict path refuses to silently switch routes while a provider holds
-     *        section-scoped state; false writes every cell through the ordinary lifecycle path.
+     *        section-scoped state.
+     * @param groupRoute true when no provider holds section-scoped state (no token can be live),
+     *        allowing each publication unit to choose the bulk section install independently;
+     *        lifecycle cells and non-minecraft sections fall through to per-cell writes.
      */
     public void writeUnit(ServerLevel level, List<EditDelta> deltas, SideEffectSet effects,
-            boolean directSections) {
+            boolean directSections, boolean groupRoute) {
         owner();
         if (deltas.isEmpty()) return;
         EditDelta first = deltas.getFirst();
@@ -285,6 +288,20 @@ public final class FabricWorldAccess {
             }
             FabricSectionPublication.install(level, chunk, deltas, mapping);
             installedSections++;
+        } else if (groupRoute && first.kind() == EditDelta.Kind.BLOCK
+                && !mapping.nativeState(first.before().id()).hasBlockEntity()
+                && !mapping.nativeState(first.after().id()).hasBlockEntity()) {
+            LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
+            var section = chunk.getSection(chunk.getSectionIndex(first.y()));
+            if (section.maybeHas(state -> !minecraftNamespace(state))) {
+                for (EditDelta delta : deltas) {
+                    write(level, delta, effects);
+                    fallbackWrites++;
+                }
+            } else {
+                FabricSectionPublication.install(level, chunk, deltas, mapping);
+                installedSections++;
+            }
         } else {
             for (EditDelta delta : deltas) {
                 write(level, delta, effects);

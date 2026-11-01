@@ -111,11 +111,17 @@ dependencies {
     "compileOnly"(libs.opac) { isTransitive = false }
     "compileOnly"(libs.fabric.permissions.api)
     "compileOnly"(libs.errorprone.annotations)
+    // Compile against the mirror's classes directory. The raw directory (rather than the source
+    // set output) keeps the classpath free of a builtBy edge; ordering and content tracking are
+    // declared on compileJava below, which avoids the task cycle that the stub inheriting
+    // main.compileClasspath would otherwise create.
     "compileOnly"(files(polymerApiStub.java.destinationDirectory))
 }
 
 tasks.named<JavaCompile>("compileJava") {
-    dependsOn(polymerApiStub.classesTaskName)
+    // Track the mirror contents as an input so edits to the stub recompile main; a raw classpath
+    // directory alone is not content-tracked. The builtBy on the output also orders the tasks.
+    inputs.files(polymerApiStub.output).withPropertyName("polymerApiStubOutput")
 }
 
 configure<BasePluginExtension> {

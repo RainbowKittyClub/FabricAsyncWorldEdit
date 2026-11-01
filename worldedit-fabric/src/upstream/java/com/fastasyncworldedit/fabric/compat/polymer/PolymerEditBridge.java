@@ -90,6 +90,16 @@ public final class PolymerEditBridge implements EditIntegration {
             return true;
         }
 
+        /**
+         * The section-count limit is gated by {@link #allowsDirectSections} before this hook runs,
+         * so a proposal reaching here is already within the limit.
+         */
+        @Override
+        public void beforePublication(ServerLevel level, List<EditDelta> authorized) {
+            throw new UnsupportedOperationException(
+                    "Polymer reservations require the route-aware beforePublication hook");
+        }
+
         @Override
         public void beforePublication(ServerLevel level, List<EditDelta> authorized,
                 boolean directSections) {
@@ -113,11 +123,6 @@ public final class PolymerEditBridge implements EditIntegration {
             BlockPos first = proposed.keySet().iterator().next();
             String location = "chunk " + proposal.chunkX() + "," + proposal.chunkZ()
                     + " at " + first.getX() + "," + first.getY() + "," + first.getZ();
-            if (sections.size() > MAX_SECTIONS) {
-                throw new IllegalStateException("Polymer direct-section route refused for " + location
-                        + ": " + sections.size() + " sections exceed the limit of " + MAX_SECTIONS
-                        + "; no writes were made");
-            }
             LevelChunk chunk = level.getChunkSource().getChunkNow(proposal.chunkX(), proposal.chunkZ());
             if (chunk == null || chunk.getPos().x() != proposal.chunkX()
                     || chunk.getPos().z() != proposal.chunkZ()) {
@@ -135,6 +140,14 @@ public final class PolymerEditBridge implements EditIntegration {
                 throw new IllegalStateException("Polymer direct-section route refused for " + location
                         + "; the chunk is reserved/quarantined or no longer loaded, no writes were made, "
                         + "and unload/reload may be required: " + refused.getMessage(), refused);
+            } catch (IllegalArgumentException refused) {
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
+                        + "; the proposal is outside the reserved sections or the chunk height and no "
+                        + "writes were made: " + refused.getMessage(), refused);
+            } catch (NoSuchMethodError | NoClassDefFoundError drift) {
+                throw new IllegalStateException("Polymer direct-section route refused for " + location
+                        + "; the installed polymer-common does not provide the expected bulk-edit API and "
+                        + "no writes were made: " + drift, drift);
             }
         }
 
