@@ -35,6 +35,7 @@ import com.fastasyncworldedit.core.queue.IQueueExtent;
 import com.fastasyncworldedit.core.queue.implementation.blocks.CharSetBlocks;
 import com.fastasyncworldedit.core.queue.implementation.chunk.ChunkHolder;
 import com.fastasyncworldedit.fabric.compat.EditIntegration;
+import com.fastasyncworldedit.fabric.compat.EditIntegrations;
 import com.fastasyncworldedit.fabric.edit.CommitReceipt;
 import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
@@ -150,7 +151,9 @@ public final class CommitContractProbe implements ModInitializer {
         var context = new EditActorContext(player.getUUID(), playerName, EditActorContext.Source.API,
                 UUID.randomUUID(), null, null, "minecraft:overworld", SideEffectSet.none(),
                 new EditActorContext.Cancellation());
-        var snapshot = FabricGetBlocks.capture(server.overworld(), 65, 64, mapping, null);
+        // Polymer quarantines a chunk whose finalization fails, so that case runs outside watched chunks.
+        int chunkZ = selected.equals("reconcile-failure") ? 80 : 64;
+        var snapshot = FabricGetBlocks.capture(server.overworld(), 65, chunkZ, mapping, null);
         require(snapshot.getBlock(4, 80, 8) != null, "Snapshot sample exists");
         char[] external = snapshot.load(5);
         char original = external[0];
@@ -165,11 +168,14 @@ public final class CommitContractProbe implements ModInitializer {
             nbt.putString("CustomName", "contract-new");
             after = new EditValue(before.id(), FrozenNbt.capture(nbt));
         }
-        deltas.add(new EditDelta(EditDelta.Kind.BLOCK, 1044, 80, 1032, "", before, after));
-        PreparedChunkEdit proposal = new PreparedChunkEdit(context, 65, 64, mapping.generation(), snapshot.dependencies(), deltas);
+        deltas.add(new EditDelta(EditDelta.Kind.BLOCK, 1044, 80, chunkZ * 16 + 8, "", before, after));
+        PreparedChunkEdit proposal = new PreparedChunkEdit(context, 65, chunkZ, mapping.generation(), snapshot.dependencies(), deltas);
         deltas.clear();
         require(proposal.writes().size() == 1, "Proposal owns its list");
-        coordinator = new FabricCommitCoordinator(server, access, List.of(provider(server, context)), workers, 8, 64L << 20);
+        // Installed integrations must take part, as in production, or validate() rejects them.
+        List<EditIntegration> providers = new ArrayList<>(EditIntegrations.discover());
+        providers.add(provider(server, context));
+        coordinator = new FabricCommitCoordinator(server, access, List.copyOf(providers), workers, 8, 64L << 20);
         operation = coordinator.admit(context, receipt -> {
             require(!server.isSameThread(), "History is detached");
             require(receipt.context() == context, "Explicit identity survives thread hop");

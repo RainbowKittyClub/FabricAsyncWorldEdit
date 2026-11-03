@@ -11,6 +11,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fastasyncworldedit.fabric.compat.EditIntegration;
+import com.fastasyncworldedit.fabric.compat.EditIntegrations;
 import com.fastasyncworldedit.fabric.edit.CommitReceipt;
 import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
@@ -446,8 +447,16 @@ public final class PublicationProbe implements ModInitializer {
         require(applied == expectedChanges && run.history.size() == expectedChanges,
                 "Actual receipts/history count: expected=" + expectedChanges + ", receipt=" + applied + ", history=" + run.history.size());
         require(run.closed.get() == run.prepared.get(), "Reservation released exactly once per attempt");
-        var stats = FabricEdits.get(level.getServer()).publicationStatistics();
-        if (!nbt && expectedChanges > 0 && !Set.of("furnace", "poi", "biome").contains(run.kind)) {
+        if (run.after == null) run.after = FabricEdits.get(level.getServer()).publicationStatistics();
+        var stats = run.after;
+        // With holder owners installed, a proposal mixing block-entity cells cannot go direct and
+        // must not bulk-install without a token, so every cell takes the ordinary route.
+        boolean perCell = run.kind.equals("be-remove") && !EditIntegrations.bulkInstallWithoutTokenSupported();
+        if (perCell) {
+            require(stats.get("sections").equals(run.before.get("sections"))
+                    && stats.get("fallbackWrites") - run.before.get("fallbackWrites") == expectedChanges,
+                    "Mixed lifecycle proposal must use only per-cell writes while holder owners are installed");
+        } else if (!nbt && expectedChanges > 0 && !Set.of("furnace", "poi", "biome").contains(run.kind)) {
             require(stats.get("sections") > run.before.get("sections"), "Real section installation did not run");
         }
         if (Set.of("unknown", "entity", "heavy-limit").contains(run.kind)) require(run.future.isCompletedExceptionally(), "Unsupported capability must refuse");
@@ -485,6 +494,8 @@ public final class PublicationProbe implements ModInitializer {
         private CompletableFuture<List<CommitReceipt>> future;
         private List<CommitReceipt> receipts = List.of();
         private Map<String, Long> before;
+        // Statistics at this run's first verification; verify-all reruns later, after other runs.
+        private Map<String, Long> after;
         private String failure = "";
         private Run(int cx, String kind) { this.cx = cx; this.kind = kind; }
     }

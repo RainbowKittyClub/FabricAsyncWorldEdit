@@ -382,7 +382,8 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
                 Map.entry("poolDone", poolTasks.stream().allMatch(java.util.concurrent.Future::isDone)),
                 Map.entry("poolSize", poolTasks.size()),
                 Map.entry("applied", receipts.stream().mapToInt(value -> value.applied().size()).sum()),
-                Map.entry("outcomes", receipts.stream().map(value -> value.outcome().name()).toList()));
+                Map.entry("outcomes", receipts.stream().map(value -> value.outcome().name()).toList()),
+                Map.entry("receiptFailures", receipts.stream().map(CommitReceipt::failure).toList()));
     }
 
     // Atomic evidence publication avoids readers observing a partially written result.

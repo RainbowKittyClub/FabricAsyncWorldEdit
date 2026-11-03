@@ -6,8 +6,8 @@ const { GateError, json, writeJson } = require('./rig')
 
 // RCON supplies fixtures and race mutations; the non-shipped consumer submits the actual API edit.
 async function contract (rig, send, name) {
-  const expected = async (block) => {
-    const result = await send(`execute if block 1044 80 1032 ${block}`)
+  const expected = async (block, z = 1032) => {
+    const result = await send(`execute if block 1044 80 ${z} ${block}`)
     if (result !== 'Test passed') throw new GateError(`Independent contract world check: ${result}`)
   }
   const clock = async () => {
@@ -23,8 +23,11 @@ async function contract (rig, send, name) {
     const fixture = scenario === 'nbt'
       ? 'minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}'
       : 'minecraft:stone'
-    await send(`setblock 1044 80 1032 ${fixture}`)
-    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : 'minecraft:stone')
+    // Polymer quarantines a chunk whose finalization fails; keep that case out of watched chunks.
+    const z = scenario === 'reconcile-failure' ? 1288 : 1032
+    if (z !== 1032) await send(`forceload add 1044 ${z}`)
+    await send(`setblock 1044 80 ${z} ${fixture}`)
+    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : 'minecraft:stone', z)
     const start = await send(`fawecontract start ${name} ${scenario}`)
     if (!start.startsWith('{')) throw new GateError(`Contract admission failed: ${start}`)
     const initial = JSON.parse(start)
@@ -73,7 +76,7 @@ async function contract (rig, send, name) {
     }
     const outcome = { deny: 'PARTIAL', cancel: 'CANCELLED_BEFORE_WRITE', conflict: 'CONFLICT', aba: 'CONFLICT' }[scenario]
     if (outcome && result.outcomes[0] !== outcome) throw new GateError(`Wrong ${scenario} outcome`)
-    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : applied ? 'minecraft:gold_block' : 'minecraft:stone')
+    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : applied ? 'minecraft:gold_block' : 'minecraft:stone', z)
     if (scenario === 'conflict') {
       if (await send('execute if block 1045 80 1032 minecraft:diamond_block') !== 'Test passed') {
         throw new GateError('Concurrent untouched cell was overwritten')
