@@ -1510,69 +1510,6 @@
         }
       ]
     },
-    "candidate": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "f20e43c1f6c8db0041632bd67de0d9542f2956e3c69611705c2e27142e15aefd",
-      "nested": [
-        {
-          "path": "META-INF/jars/SparseBitSet-1.3.jar",
-          "sha256": "ba3ece2f548906acdd158689457abc33fbd8c8c7e9bf4922cc606b6a47a41b1e"
-        },
-        {
-          "path": "META-INF/jars/fabric-api-base-2.0.6+fcdff87f5d.jar",
-          "sha256": "88485b1edbcb642fa28b8f53e173835b19f6b6e49aa5b088e3fe16653ef67a13"
-        },
-        {
-          "path": "META-INF/jars/fabric-command-api-v2-3.1.2+fcdff87f5d.jar",
-          "sha256": "71e0ce2931b3467422b17fd49b181698a7ed79ca8cb92d112fc50ad2fced105e"
-        },
-        {
-          "path": "META-INF/jars/fabric-data-attachment-api-v1-2.2.33+b9b88df45d.jar",
-          "sha256": "2cb62d5460dd5f2d696c1ab8afa8b028614d0e0aeb9780614b057cd0f2882425"
-        },
-        {
-          "path": "META-INF/jars/fabric-events-interaction-v0-5.3.9+b9b88df45d.jar",
-          "sha256": "08f277a35b23212bf25b2b7608fb1ccbc0124bd55642f378313f748464bea640"
-        },
-        {
-          "path": "META-INF/jars/fabric-lifecycle-events-v1-4.1.9+ffef5f675d.jar",
-          "sha256": "b9ba49109cf21f968d0b44c26b2c930af74d54e2f71d9fdf505e1359275842e2"
-        },
-        {
-          "path": "META-INF/jars/fabric-networking-api-v1-6.4.0+a21c9eb65d.jar",
-          "sha256": "0e2f968b6241e9e5556c04962c253539fca127384f9d17eb200fa26bca4a87d2"
-        },
-        {
-          "path": "META-INF/jars/jchronic-0.2.4a.jar",
-          "sha256": "4bbd08f7409db906f72b34b01bde2f8001638e8ca2e623954f01e2f3ab3ea5f9"
-        },
-        {
-          "path": "META-INF/jars/json-simple-1.1.1.jar",
-          "sha256": "01c5ccd8aefe4e466bde240da4ccafb7358428313d8b5d0a9fcde92b980cb94c"
-        },
-        {
-          "path": "META-INF/jars/parallelgzip-1.0.5.jar",
-          "sha256": "e214c280a6952cd46bd8de18b432da41aa86d73dbf98e1b508d51a266de72d47"
-        },
-        {
-          "path": "META-INF/jars/snakeyaml-2.2.jar",
-          "sha256": "8380f978e15eabcf5b2e082049980784b99a26cf33b4fca17370c73a0809bdb3"
-        },
-        {
-          "path": "META-INF/jars/worldeditcui-protocol-fabric-mc26.3-4.0.3.jar",
-          "sha256": "8b03dc3c78c18c3bbe0b49a2089783f10ae48fb8119c651774928c074bb6032a"
-        },
-        {
-          "path": "META-INF/jars/zstd-jni-1.4.8-1.jar",
-          "sha256": "78cf11f4ced476cc64c57a36932c89c817ef87bed64704159e59a4d3a07abb1e"
-        }
-      ]
-    },
-    "lifecycle-probe": {
-      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba",
-      "nested": []
-    },
     "polymer-accepted": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/build/libs/polymer-bundled-0.18.6-fawe-s7.1+26.3.jar",
       "sha256": "45df484e340d68332c1bbaff5d4eae42629703c161b5cea27e2277ca074aa7a5",
@@ -1846,6 +1783,69 @@
           "nested": []
         }
       ]
+    },
+    "candidate": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
+      "sha256": "5d27ffed0d78c49b6b9785dfafc03e94a77fa342ad0fc2e935349c460d34c8a7",
+      "nested": [
+        {
+          "path": "META-INF/jars/SparseBitSet-1.3.jar",
+          "sha256": "ba3ece2f548906acdd158689457abc33fbd8c8c7e9bf4922cc606b6a47a41b1e"
+        },
+        {
+          "path": "META-INF/jars/fabric-api-base-2.0.6+fcdff87f5d.jar",
+          "sha256": "88485b1edbcb642fa28b8f53e173835b19f6b6e49aa5b088e3fe16653ef67a13"
+        },
+        {
+          "path": "META-INF/jars/fabric-command-api-v2-3.1.2+fcdff87f5d.jar",
+          "sha256": "71e0ce2931b3467422b17fd49b181698a7ed79ca8cb92d112fc50ad2fced105e"
+        },
+        {
+          "path": "META-INF/jars/fabric-data-attachment-api-v1-2.2.33+b9b88df45d.jar",
+          "sha256": "2cb62d5460dd5f2d696c1ab8afa8b028614d0e0aeb9780614b057cd0f2882425"
+        },
+        {
+          "path": "META-INF/jars/fabric-events-interaction-v0-5.3.9+b9b88df45d.jar",
+          "sha256": "08f277a35b23212bf25b2b7608fb1ccbc0124bd55642f378313f748464bea640"
+        },
+        {
+          "path": "META-INF/jars/fabric-lifecycle-events-v1-4.1.9+ffef5f675d.jar",
+          "sha256": "b9ba49109cf21f968d0b44c26b2c930af74d54e2f71d9fdf505e1359275842e2"
+        },
+        {
+          "path": "META-INF/jars/fabric-networking-api-v1-6.4.0+a21c9eb65d.jar",
+          "sha256": "0e2f968b6241e9e5556c04962c253539fca127384f9d17eb200fa26bca4a87d2"
+        },
+        {
+          "path": "META-INF/jars/jchronic-0.2.4a.jar",
+          "sha256": "4bbd08f7409db906f72b34b01bde2f8001638e8ca2e623954f01e2f3ab3ea5f9"
+        },
+        {
+          "path": "META-INF/jars/json-simple-1.1.1.jar",
+          "sha256": "01c5ccd8aefe4e466bde240da4ccafb7358428313d8b5d0a9fcde92b980cb94c"
+        },
+        {
+          "path": "META-INF/jars/parallelgzip-1.0.5.jar",
+          "sha256": "e214c280a6952cd46bd8de18b432da41aa86d73dbf98e1b508d51a266de72d47"
+        },
+        {
+          "path": "META-INF/jars/snakeyaml-2.2.jar",
+          "sha256": "8380f978e15eabcf5b2e082049980784b99a26cf33b4fca17370c73a0809bdb3"
+        },
+        {
+          "path": "META-INF/jars/worldeditcui-protocol-fabric-mc26.3-4.0.3.jar",
+          "sha256": "8b03dc3c78c18c3bbe0b49a2089783f10ae48fb8119c651774928c074bb6032a"
+        },
+        {
+          "path": "META-INF/jars/zstd-jni-1.4.8-1.jar",
+          "sha256": "78cf11f4ced476cc64c57a36932c89c817ef87bed64704159e59a4d3a07abb1e"
+        }
+      ]
+    },
+    "lifecycle-probe": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
+      "sha256": "fd18d29e5156241d56b6f4c7ab9ab63d51b411649165f98afdaa97d9b0d1a9ba",
+      "nested": []
     }
   },
   "profiles": {
@@ -1853,25 +1853,25 @@
       "worldedit-reference",
       "fabric-api"
     ],
-    "base": [
-      "candidate",
-      "fabric-api",
-      "lifecycle-probe"
-    ],
     "polymer": [
       "candidate",
       "fabric-api-polymer",
       "lifecycle-probe",
       "polymer-accepted"
+    ],
+    "base": [
+      "candidate",
+      "fabric-api",
+      "lifecycle-probe"
     ]
   },
   "unavailableProfiles": [
-    "claims",
     "audit",
-    "full",
-    "vanilla-light",
     "backend-db",
-    "paper"
+    "claims",
+    "full",
+    "paper",
+    "vanilla-light"
   ],
   "unresolved": [
     "Bridge-specific permissions/audit consumers and profile suites belong to S6-S14",
