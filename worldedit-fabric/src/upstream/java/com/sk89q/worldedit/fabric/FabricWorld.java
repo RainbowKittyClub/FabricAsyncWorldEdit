@@ -161,6 +161,10 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     private final String worldNameRef;
     private final FabricWorldNativeAccess worldNativeAccess;
     private final EditActorContext editContext;
+    private final com.sk89q.worldedit.extension.platform.Actor actor;
+    // Cells refused for lack of lifecycle support; the session leaves them unchanged and reports on flush.
+    private final List<com.fastasyncworldedit.fabric.edit.UnsupportedBlockException> skipped =
+            Collections.synchronizedList(new ArrayList<>());
     private java.util.function.Consumer<CommitReceipt> nativeHistory = receipt -> { };
     private volatile CommitReceipt lastNativeReceipt;
 
@@ -170,12 +174,13 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
      * @param world the world
      */
     FabricWorld(Level world) {
-        this(world, null);
+        this(world, null, null);
     }
 
-    private FabricWorld(Level world, EditActorContext context) {
+    private FabricWorld(Level world, EditActorContext context, com.sk89q.worldedit.extension.platform.Actor actor) {
         checkNotNull(world);
         this.editContext = context;
+        this.actor = actor;
         this.worldRef = new WeakReference<>(world);
         LevelData levelData = world.getLevelData();
         this.worldNameRef = levelData instanceof ServerLevelData serverLevelData
@@ -205,7 +210,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                 actor.getName(), EditActorContext.Source.API, java.util.UUID.randomUUID(), null, null,
                 getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
                 new EditActorContext.Cancellation());
-        return new FabricWorld(getWorld(), context);
+        return new FabricWorld(getWorld(), context, actor);
     }
 
     @Override
@@ -217,7 +222,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                 java.util.UUID.randomUUID(), origin.operationId(), origin.actorId(),
                 getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
                 new EditActorContext.Cancellation());
-        return new FabricWorld(getWorld(), context);
+        return new FabricWorld(getWorld(), context, actor);
     }
 
     @Override
@@ -759,7 +764,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         EditActorContext unit = new EditActorContext(editContext.actorId(), editContext.actorName(),
                 editContext.source(), java.util.UUID.randomUUID(),
                 replay ? editContext.parentId() : editContext.operationId(), editContext.originalActorId(),
-                editContext.dimension(), effects, editContext.cancellation(), editContext.operationId());
+                editContext.dimension(), effects, editContext.cancellation().child(), editContext.operationId());
         var completion = TaskManager.taskManager().sync(() -> FabricEdits.nativeService(level.getServer())
                 .submitNative(unit, kind, pos, target.get(), nativeHistory));
         try {
@@ -772,9 +777,31 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         } catch (java.util.concurrent.CompletionException failure) {
             if (failure.getCause() instanceof com.fastasyncworldedit.fabric.edit.FabricCommitCoordinator.CommitFailure commit) {
                 lastNativeReceipt = commit.receipt();
+                var unsupported = unsupportedBlock(commit);
+                if (unsupported != null) {
+                    skipped.add(unsupported);
+                    return false;
+                }
             }
+            // Each cell has its own cancellation, so any other failure must stop the operation here.
+            editContext.cancellation().cancel();
             throw failure;
         }
+    }
+
+    // Only a clean pre-write refusal for lack of lifecycle support is skippable.
+    private static com.fastasyncworldedit.fabric.edit.UnsupportedBlockException unsupportedBlock(
+            com.fastasyncworldedit.fabric.edit.FabricCommitCoordinator.CommitFailure commit) {
+        CommitReceipt receipt = commit.receipt();
+        if (receipt.outcome() != CommitReceipt.Outcome.FAILED_BEFORE_WRITE || !receipt.applied().isEmpty()) {
+            return null;
+        }
+        for (Throwable cause = commit.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof com.fastasyncworldedit.fabric.edit.UnsupportedBlockException unsupported) {
+                return unsupported;
+            }
+        }
+        return null;
     }
 
     // Only owner-thread mutation/history code sees this ungated before image.
@@ -904,6 +931,37 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public void flush() {
         worldNativeAccess.flush();
+        reportSkipped();
+    }
+
+    private static final int SKIPPED_LISTED = 8;
+
+    // One summary per flush; the cells were left unchanged and are absent from history.
+    private void reportSkipped() {
+        List<com.fastasyncworldedit.fabric.edit.UnsupportedBlockException> cells;
+        synchronized (skipped) {
+            if (skipped.isEmpty()) {
+                return;
+            }
+            cells = List.copyOf(skipped);
+            skipped.clear();
+        }
+        if (actor == null) {
+            return;
+        }
+        StringBuilder text = new StringBuilder("Skipped ").append(cells.size())
+                .append(cells.size() == 1 ? " unsupported block" : " unsupported blocks")
+                .append(", left unchanged (no lifecycle support yet): ");
+        for (int i = 0; i < Math.min(cells.size(), SKIPPED_LISTED); i++) {
+            var cell = cells.get(i);
+            text.append(i == 0 ? "" : "; ").append(cell.block()).append(" at ")
+                    .append(cell.x()).append(',').append(cell.y()).append(',').append(cell.z());
+        }
+        if (cells.size() > SKIPPED_LISTED) {
+            text.append("; and ").append(cells.size() - SKIPPED_LISTED).append(" more");
+        }
+        actor.print(com.sk89q.worldedit.util.formatting.text.TextComponent.of(text.toString(),
+                com.sk89q.worldedit.util.formatting.text.format.TextColor.YELLOW));
     }
 
     @Override

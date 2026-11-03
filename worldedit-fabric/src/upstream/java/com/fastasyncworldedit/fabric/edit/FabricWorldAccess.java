@@ -159,7 +159,7 @@ public final class FabricWorldAccess {
                     for (EditValue value : new EditValue[] {delta.before(), delta.after()}) {
                         var state = mapping.nativeState(value.id());
                         if (!SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
-                            throw new UnsupportedOperationException("No lifecycle capability for " + value.id());
+                            throw new UnsupportedBlockException(value.id(), delta.x(), delta.y(), delta.z());
                         }
                         if (value.nbt() != null && !state.hasBlockEntity()) {
                             throw new IllegalArgumentException("NBT on a block without a block entity");

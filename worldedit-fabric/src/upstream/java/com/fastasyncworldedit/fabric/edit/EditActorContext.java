@@ -59,6 +59,20 @@ public record EditActorContext(UUID actorId, String actorName, Source source, UU
     /** Cancellation cannot be cleared or used to retract already published changes. */
     public static final class Cancellation {
         private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final Cancellation parent;
+
+        public Cancellation() {
+            this(null);
+        }
+
+        private Cancellation(Cancellation parent) {
+            this.parent = parent;
+        }
+
+        /** Unit scope: cancelled with this one, while cancelling the child leaves this one running. */
+        public Cancellation child() {
+            return new Cancellation(this);
+        }
 
         /** Cancel remaining work; already published receipts remain valid. */
         public void cancel() {
@@ -67,7 +81,7 @@ public record EditActorContext(UUID actorId, String actorName, Source source, UU
 
         /** Whether remaining work must be refused. */
         public boolean isCancelled() {
-            return cancelled.get();
+            return cancelled.get() || (parent != null && parent.isCancelled());
         }
     }
 }

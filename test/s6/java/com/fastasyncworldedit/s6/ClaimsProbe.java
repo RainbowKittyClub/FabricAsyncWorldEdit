@@ -846,8 +846,11 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
             if (nativeReceipts.size() != before || history.size() != 0) {
                 throw new AssertionError("Unsupported native operation reached mutation/history");
             }
-            refusedNative("native-unknown-lifecycle", "No lifecycle capability", () ->
-                    session.setBlock(pos, BlockState.get("minecraft:beacon")));
+            // A cell without lifecycle support is skipped and reported at flush, never written.
+            if (session.setBlock(pos, BlockState.get("minecraft:beacon"))) {
+                throw new AssertionError("Unknown native lifecycle reported a change");
+            }
+            server.execute(() -> results.add(Map.of("case", "native-unknown-lifecycle", "outcome", "skipped")));
             if (history.size() != 0 || nativeReceipts.subList(before, nativeReceipts.size()).stream()
                     .anyMatch(receipt -> !receipt.applied().isEmpty())) {
                 throw new AssertionError("Unknown native lifecycle changed history or receipts");
