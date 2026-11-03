@@ -69,7 +69,7 @@ public final class PreparationProbe implements ModInitializer {
     private static final AtomicInteger violations = new AtomicInteger();
     private static long startSnapshots;
     private static boolean cancelled;
-    private static AttachmentType<String> attachment;
+    static AttachmentType<String> attachment;
     private static final List<Integer> paletteBits = new ArrayList<>();
 
     @Override

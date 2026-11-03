@@ -51,9 +51,13 @@ public final class PublicationProbe implements ModInitializer {
     private static CompletableFuture<?> fixture = CompletableFuture.completedFuture(null);
     private static int nextChunk = 80;
     private static final int Z = 64;
+    // Real unload events per chunk: `execute if loaded` turns false before the chunk leaves memory.
+    private static final Map<Long, Integer> UNLOADS = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public void onInitialize() {
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_UNLOAD.register((level, chunk) ->
+                UNLOADS.merge(chunk.getPos().pack(), 1, Integer::sum));
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
                 Commands.literal("fawepublish").then(Commands.argument("arguments", StringArgumentType.greedyString())
                         .executes(command -> {
@@ -158,6 +162,21 @@ public final class PublicationProbe implements ModInitializer {
         switch (words[0]) {
             case "stats" -> {
                 return new Gson().toJson(FabricEdits.get(server).publicationStatistics());
+            }
+            // unloads <chunkX> <chunkZ>: how many times a chunk at that position has really unloaded.
+            case "unloads" -> {
+                return new Gson().toJson(Map.of("unloads", UNLOADS.getOrDefault(
+                        ChunkPos.pack(Integer.parseInt(words[1]), Integer.parseInt(words[2])), 0)));
+            }
+            // attach chunk|block <x> <y> <z> on|off: opaque test attachment for the refusal-class checks.
+            case "attach" -> {
+                BlockPos pos = new BlockPos(Integer.parseInt(words[2]), Integer.parseInt(words[3]), Integer.parseInt(words[4]));
+                Object owner = words[1].equals("chunk") ? level.getChunkAt(pos)
+                        : java.util.Objects.requireNonNull(level.getBlockEntity(pos), "No block entity");
+                var target = (net.fabricmc.fabric.api.attachment.v1.AttachmentTarget) owner;
+                if (words[5].equals("on")) target.setAttached(PreparationProbe.attachment, "opaque-test-payload");
+                else target.removeAttached(PreparationProbe.attachment);
+                return new Gson().toJson(Map.of("target", words[1], "attached", target.hasAttached(PreparationProbe.attachment)));
             }
             case "fault-skip-reconcile" -> {
                 BridgeFaults.skipReconcile = Boolean.parseBoolean(words[1]);

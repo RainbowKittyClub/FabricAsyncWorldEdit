@@ -11,11 +11,14 @@ const manifest = JSON.parse(fs.readFileSync(manifestFile))
 const evidence = path.join(repo, 'handoff/s6')
 const suite = process.argv[2] || 'claims'
 if (!['claims', 'history', 'edges', 's5'].includes(suite)) throw new Error('Expected claims, history, edges or s5 suite')
-const profile = suite === 's5' ? 'base' : 'claims'
+// --polymer: the same suite with the accepted Polymer bundle installed (S7 regression).
+const polymer = process.argv.includes('--polymer')
+if (polymer && suite === 's5') throw new Error('Use the harness s5 polymer profile instead')
+const profile = suite === 's5' ? 'base' : polymer ? 'claims-polymer' : 'claims'
 
 async function main () {
   const recordFile = path.join(evidence, `native-${Date.now()}.json`)
-  const report = { accepted: false, completedStages: [], suite, resourcePolicy: RESOURCE_POLICY, samples: [] }
+  const report = { accepted: false, completedStages: [], suite, profile, resourcePolicy: RESOURCE_POLICY, samples: [] }
   let rig, lease, problem
   try {
     for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])

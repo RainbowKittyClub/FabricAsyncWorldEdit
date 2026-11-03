@@ -19,4 +19,9 @@ for key, suffix in [('candidate', 'dist'), ('s6-probe', 's6probe'), ('lifecycle-
                   for name in archive.namelist() if name.endswith('.jar')]
     manifest['availableDependencies'][key] = {'path': str(jar),
         'sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'nested': nested}
+# Polymer installed: the candidate manifest's accepted Polymer bundle on the claims profile.
+candidate = json.loads((root / 'test/candidate-manifest.json').read_text())
+manifest['availableDependencies']['polymer-accepted'] = candidate['availableDependencies']['polymer-accepted']
+manifest['profiles']['claims-polymer'] = manifest['profiles']['claims'] + ['polymer-accepted']
+manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles'] if name != 'polymer']
 (root / 'test/s6/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
