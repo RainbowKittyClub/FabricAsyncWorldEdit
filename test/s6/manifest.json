@@ -1512,7 +1512,7 @@
     },
     "candidate": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "bd510236da77e9961cf9931af3a5b1ee293a857acdd4c2b065a0460120169724",
+      "sha256": "a297d1634c1e26161e3e03f1a800083c896c3d8e1b31933f2e273074062a6ac1",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
@@ -1570,7 +1570,7 @@
     },
     "lifecycle-probe": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "2010dbc97b1208ef4ef5a009e47704fe66543cfcfd84d8b1d2503fa69b7f9b29",
+      "sha256": "d4794d1674ac76d651cf6b3b5bad548f980ec3d124ab05620b5e9d86cd5519e6",
       "nested": []
     },
     "s6-probe": {
@@ -1595,6 +1595,53 @@
           "sha256": "546f48b30f87e238dd6f68764d7a98ab9b2f5faf94f3cd876459144e19050f4b"
         }
       ]
+    },
+    "polymer-accepted": {
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/fawe-fast-editing-20261029-s7/build/libs/polymer-bundled-0.18.6-fawe-s7.1+26.3.jar",
+      "sha256": "45df484e340d68332c1bbaff5d4eae42629703c161b5cea27e2277ca074aa7a5",
+      "bytes": 1570924,
+      "nested": [
+        {
+          "entry": "META-INF/jars/polymer-autohost-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "26966e8f04f096e5dc8a41790a8a2a7eefd7adb9dca5ebec9a73cc5d55d5eaf5",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-blocks-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "c5917e2c01e5ae4389bfada1826a3445928658cbd38bc729b11f8d39bae5ef27",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-common-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "d55f954fd58301e353ddbc1424a8e3c3ad9191cd309b65c4309ef0c185d40261",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-core-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "ee049973e8c838ea39193953f90a5d8b4a04596f05f0ae8d75b25bad204b5ee4",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-resource-pack-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "f37cd4a7818d35ba75cdf65fb482487785aca58067b6f1f91f47587ac98a0dc3",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-resource-pack-extras-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "0d90d0ab04af4d52ce9de7795a25ba41d1079a0828e244ae75c60ca4b9976275",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-sound-patcher-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "29e2824211539c8eaf1fdfb96fc64c46426cfd811c3b9c2db61e2d43725fc610",
+          "nested": []
+        },
+        {
+          "entry": "META-INF/jars/polymer-virtual-entity-0.18.6-fawe-s7.1+26.3.jar",
+          "sha256": "7ce2e4c2d8b14444e7760d5e6658f41778e91d4223691c2b7d7521e003421f2b",
+          "nested": []
+        }
+      ]
     }
   },
   "profiles": {
@@ -1614,11 +1661,19 @@
       "forge-config",
       "s6-probe",
       "test-permissions"
+    ],
+    "claims-polymer": [
+      "candidate",
+      "fabric-api",
+      "opac",
+      "forge-config",
+      "s6-probe",
+      "test-permissions",
+      "polymer-accepted"
     ]
   },
   "unavailableProfiles": [
     "audit",
-    "polymer",
     "full",
     "vanilla-light",
     "backend-db",
