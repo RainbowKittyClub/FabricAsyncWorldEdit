@@ -37,7 +37,9 @@ public record CommitReceipt(EditActorContext context, int chunkX, int chunkZ,
     /** Terminal states distinguish publication facts from notification success. */
     public enum Outcome {
         COMPLETE, CANCELLED_BEFORE_WRITE, PARTIAL, FAILED_BEFORE_WRITE, CONFLICT,
-        APPLIED_BUT_FINALIZATION_FAILED
+        APPLIED_BUT_FINALIZATION_FAILED,
+        /** A write was attempted but some actual values could not be read; applied is a lower bound. */
+        APPLIED_UNKNOWN
     }
 
     /**

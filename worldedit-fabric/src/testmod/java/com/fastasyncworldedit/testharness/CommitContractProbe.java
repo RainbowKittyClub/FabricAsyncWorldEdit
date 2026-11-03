@@ -25,8 +25,11 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
 
 import com.fastasyncworldedit.core.extent.processor.EmptyBatchProcessor;
 import com.fastasyncworldedit.core.queue.IChunkGet;
@@ -67,6 +70,16 @@ public final class CommitContractProbe implements ModInitializer {
     private final AtomicInteger closed = new AtomicInteger();
     private String scenario;
     private int checks;
+    // One-shot read-back fault target for the readback-failure case; see mixin/ReadBackFault.
+    private static final AtomicReference<BlockPos> readBackFault = new AtomicReference<>();
+
+    /** True once, for the first read of the armed cell after it already holds the written value. */
+    public static boolean failReadBack(ServerLevel level, EditDelta delta) {
+        BlockPos target = readBackFault.get();
+        return target != null && delta.x() == target.getX() && delta.y() == target.getY()
+                && delta.z() == target.getZ() && level.getBlockState(target).is(Blocks.GOLD_BLOCK)
+                && readBackFault.compareAndSet(target, null);
+    }
 
     @Override
     public void onInitialize() {
@@ -151,8 +164,9 @@ public final class CommitContractProbe implements ModInitializer {
         var context = new EditActorContext(player.getUUID(), playerName, EditActorContext.Source.API,
                 UUID.randomUUID(), null, null, "minecraft:overworld", SideEffectSet.none(),
                 new EditActorContext.Cancellation());
-        // Polymer quarantines a chunk whose finalization fails, so that case runs outside watched chunks.
-        int chunkZ = selected.equals("reconcile-failure") ? 80 : 64;
+        // Polymer quarantines a chunk whose finalization fails, so those cases run outside watched chunks.
+        int chunkZ = selected.equals("reconcile-failure") ? 80 : selected.equals("readback-failure") ? 81 : 64;
+        readBackFault.set(selected.equals("readback-failure") ? new BlockPos(1044, 80, chunkZ * 16 + 8) : null);
         var snapshot = FabricGetBlocks.capture(server.overworld(), 65, chunkZ, mapping, null);
         require(snapshot.getBlock(4, 80, 8) != null, "Snapshot sample exists");
         char[] external = snapshot.load(5);

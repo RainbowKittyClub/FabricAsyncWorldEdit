@@ -329,6 +329,7 @@ public final class FabricCommitCoordinator {
     private void publish(Pending unit) {
         PreparedChunkEdit proposal = unit.proposal;
         List<CommitReceipt.AppliedDelta> applied = new ArrayList<>();
+        Throwable readBackFailure = null;
         List<EditDelta> authorized = new ArrayList<>();
         int denied = 0;
         int noOp = 0;
@@ -433,13 +434,28 @@ public final class FabricCommitCoordinator {
                             }
                         } finally {
                             for (EditDelta delta : group) {
-                                EditValue actualAfter = access.read(level, delta);
+                                EditValue actualAfter;
+                                try {
+                                    actualAfter = access.read(level, delta);
+                                } catch (Throwable unreadable) {
+                                    // A write was attempted, so an unreadable cell may have changed.
+                                    if (readBackFailure == null) {
+                                        readBackFailure = unreadable;
+                                    } else {
+                                        readBackFailure.addSuppressed(unreadable);
+                                    }
+                                    continue;
+                                }
                                 if (!Objects.equals(delta.before(), actualAfter)) {
                                     applied.add(new CommitReceipt.AppliedDelta(unit.operation.sequence++,
                                             new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(), delta.key(),
                                                     delta.before(), actualAfter)));
                                 }
                             }
+                        }
+                        if (readBackFailure != null) {
+                            throw new IllegalStateException("Actual values could not be read back after a write;"
+                                    + " applied changes are a lower bound", readBackFailure);
                         }
                     }
                     if (denied != 0) {
@@ -449,7 +465,11 @@ public final class FabricCommitCoordinator {
             }
         } catch (Throwable problem) {
             failure = problem;
-            outcome = applied.isEmpty() ? CommitReceipt.Outcome.FAILED_BEFORE_WRITE : CommitReceipt.Outcome.PARTIAL;
+            if (readBackFailure != null && problem.getCause() != readBackFailure) {
+                problem.addSuppressed(readBackFailure);
+            }
+            outcome = readBackFailure != null ? CommitReceipt.Outcome.APPLIED_UNKNOWN
+                    : applied.isEmpty() ? CommitReceipt.Outcome.FAILED_BEFORE_WRITE : CommitReceipt.Outcome.PARTIAL;
             proposal.context().cancellation().cancel();
         }
         CommitReceipt receipt = new CommitReceipt(proposal.context(), proposal.chunkX(), proposal.chunkZ(),
@@ -586,14 +606,16 @@ public final class FabricCommitCoordinator {
         CommitReceipt terminal = receipt;
         if (problem != null) {
             unit.operation.context.cancellation().cancel();
-            if (!receipt.applied().isEmpty()) {
+            boolean unknown = receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN;
+            if (unknown || !receipt.applied().isEmpty()) {
                 quarantined.add(chunkKey(unit.proposal));
             }
             terminal = new CommitReceipt(receipt.context(), receipt.chunkX(), receipt.chunkZ(), receipt.applied(),
-                    receipt.denied(), receipt.noOp(), receipt.applied().isEmpty()
-                            ? receipt.outcome() == CommitReceipt.Outcome.CANCELLED_BEFORE_WRITE
-                                    ? receipt.outcome() : CommitReceipt.Outcome.FAILED_BEFORE_WRITE
-                            : CommitReceipt.Outcome.APPLIED_BUT_FINALIZATION_FAILED, problem.toString());
+                    receipt.denied(), receipt.noOp(), unknown ? receipt.outcome()
+                            : !receipt.applied().isEmpty() ? CommitReceipt.Outcome.APPLIED_BUT_FINALIZATION_FAILED
+                            : receipt.outcome() == CommitReceipt.Outcome.CANCELLED_BEFORE_WRITE
+                                    ? receipt.outcome() : CommitReceipt.Outcome.FAILED_BEFORE_WRITE,
+                    problem.toString());
         }
         pending.remove(unit);
         retainedBytes -= unit.bytes;

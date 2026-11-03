@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.sk89q.worldedit.WorldEdit;
@@ -140,12 +141,20 @@ public final class FabricRegionCommands {
                     source.sendSuccess(() -> Component.literal("Coordinated edit complete: " + history.size()
                             + " changes (memory history; no neighbor callbacks)."), false);
                 } else {
-                    // A refusal is clean only when no earlier unit recorded changes; otherwise report partial work.
-                    CommitReceipt refusal = history.size() == 0 ? preWriteRefusal(failure) : null;
+                    // A refusal is clean only when no unit recorded or may have made changes.
+                    CommitReceipt unknown = receiptMatching(failure,
+                            receipt -> receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN);
+                    CommitReceipt refusal = history.size() == 0 && unknown == null
+                            ? receiptMatching(failure, FabricRegionCommands::isPreWriteRefusal) : null;
                     if (refusal != null) {
                         source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
                                 + refusal.chunkX() + "," + refusal.chunkZ()
                                 + "; no changes were written: " + refusalReason(refusal)));
+                    } else if (unknown != null) {
+                        source.sendFailure(Component.literal("Coordinated edit failed: chunk "
+                                + unknown.chunkX() + "," + unknown.chunkZ() + " was written but could not be"
+                                + " read back, so it is quarantined; at least " + history.size()
+                                + " recorded changes: " + failure));
                     } else {
                         source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
                                 + " recorded changes: " + failure));
@@ -160,16 +169,16 @@ public final class FabricRegionCommands {
         }
     }
 
-    // Only an explicit pre-write failure is reported as a refusal; partial/post-write failures keep their wording.
-    private static CommitReceipt preWriteRefusal(Throwable failure) {
+    // First receipt carried by the failure chain that matches; partial/post-write failures keep their wording.
+    private static CommitReceipt receiptMatching(Throwable failure, Predicate<CommitReceipt> test) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             if (current instanceof FabricCommitCoordinator.CommitFailure commit) {
                 CommitReceipt receipt = commit.receipt();
-                if (isPreWriteRefusal(receipt)) return receipt;
+                if (test.test(receipt)) return receipt;
             }
             if (current instanceof FabricEdits.OperationFailure operation) {
                 for (CommitReceipt receipt : operation.publishedReceipts()) {
-                    if (isPreWriteRefusal(receipt)) return receipt;
+                    if (test.test(receipt)) return receipt;
                 }
             }
         }

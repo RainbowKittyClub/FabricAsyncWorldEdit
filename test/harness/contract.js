@@ -19,12 +19,12 @@ async function contract (rig, send, name) {
   const status = async () => JSON.parse(await send('fawecontract status'))
   const results = []
   for (const scenario of ['basic', 'held', 'deny', 'cancel', 'conflict', 'aba', 'nbt',
-    'shutdown-prepare', 'shutdown-discard-failure', 'shutdown-audit', 'reconcile-failure']) {
+    'shutdown-prepare', 'shutdown-discard-failure', 'shutdown-audit', 'reconcile-failure', 'readback-failure']) {
     const fixture = scenario === 'nbt'
       ? 'minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}'
       : 'minecraft:stone'
-    // Polymer quarantines a chunk whose finalization fails; keep that case out of watched chunks.
-    const z = scenario === 'reconcile-failure' ? 1288 : 1032
+    // Polymer quarantines a chunk whose finalization fails; keep those cases out of watched chunks.
+    const z = { 'reconcile-failure': 1288, 'readback-failure': 1304 }[scenario] ?? 1032
     if (z !== 1032) await send(`forceload add 1044 ${z}`)
     await send(`setblock 1044 80 ${z} ${fixture}`)
     await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : 'minecraft:stone', z)
@@ -68,15 +68,18 @@ async function contract (rig, send, name) {
     await rig.wait(`${scenario} actual receipt`, () => fs.existsSync(evidence), 30000)
     const result = json(evidence)
     const applied = ['basic', 'held', 'nbt', 'shutdown-audit', 'reconcile-failure'].includes(scenario) ? 1 : 0
+    // An unreadable written cell is absent from applied, yet the world holds the new value.
+    const written = applied === 1 || scenario === 'readback-failure'
     const preStop = scenario === 'shutdown-prepare' || scenario === 'shutdown-discard-failure'
-    const exceptional = preStop || scenario === 'shutdown-audit' || scenario === 'reconcile-failure'
+    const exceptional = preStop || ['shutdown-audit', 'reconcile-failure', 'readback-failure'].includes(scenario)
     if (result.applied !== applied || result.exceptional !== exceptional ||
         result.closed !== (preStop ? 0 : 1) || result.recorded !== (preStop ? 0 : 1) || result.pending !== 0 || result.bytes !== 0) {
       throw new GateError(`Incorrect ${scenario} receipt: ${JSON.stringify(result)}`)
     }
-    const outcome = { deny: 'PARTIAL', cancel: 'CANCELLED_BEFORE_WRITE', conflict: 'CONFLICT', aba: 'CONFLICT' }[scenario]
-    if (outcome && result.outcomes[0] !== outcome) throw new GateError(`Wrong ${scenario} outcome`)
-    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : applied ? 'minecraft:gold_block' : 'minecraft:stone', z)
+    const outcome = { deny: 'PARTIAL', cancel: 'CANCELLED_BEFORE_WRITE', conflict: 'CONFLICT', aba: 'CONFLICT',
+      'readback-failure': 'APPLIED_UNKNOWN' }[scenario]
+    if (outcome && result.outcomes[0] !== outcome) throw new GateError(`Wrong ${scenario} outcome: ${result.outcomes}`)
+    await expected(scenario === 'nbt' ? 'minecraft:chest[facing=north]' : written ? 'minecraft:gold_block' : 'minecraft:stone', z)
     if (scenario === 'conflict') {
       if (await send('execute if block 1045 80 1032 minecraft:diamond_block') !== 'Test passed') {
         throw new GateError('Concurrent untouched cell was overwritten')
