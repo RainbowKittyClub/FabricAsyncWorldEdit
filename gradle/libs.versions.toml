@@ -13,6 +13,8 @@ fabric-loader = "0.19.5"
 fabric-minecraft = "26.3"
 fabric-permissions-api = "0.7.0"
 opac = "fabric-26.3-0.33.0"
+# RKC Ledger fork with the producer batch API (rkc/forks/Ledger, branch rkc/producer-batches).
+ledger = "1.3.25-rkc.1+local"
 
 # Minimum versions we apply to make dependencies support newer Java
 minimumTinyRemapper = "0.8.11"
@@ -93,6 +95,7 @@ fabric-permissions-api = { group = "me.lucko", name = "fabric-permissions-api", 
 
 # Plugins
 opac = { group = "maven.modrinth", name = "open-parties-and-claims", version.ref = "opac" }
+ledger = { group = "com.github.quiltservertools", name = "Ledger", version.ref = "ledger" }
 dummypermscompat = { group = "com.sk89q", name = "dummypermscompat", version.ref = "dummypermscompat" }
 worldguard = { group = "com.sk89q.worldguard", name = "worldguard-bukkit", version.ref = "worldguard-bukkit" }
 griefprevention = { group = "com.github.TechFortress", name = "GriefPrevention", version.ref = "griefprevention" }

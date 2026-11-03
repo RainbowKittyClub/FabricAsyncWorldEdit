@@ -77,6 +77,10 @@ repositories {
         url = uri("https://maven.enginehub.org/repo/")
         content { excludeGroup("net.kyori") }
     }
+    // The Ledger fork is built locally; nothing else may resolve from here.
+    mavenLocal {
+        content { includeModule("com.github.quiltservertools", "Ledger") }
+    }
     verifyEngineHubRepositories()
 }
 
@@ -109,6 +113,7 @@ dependencies {
         "implementation"(dep)
     }
     "compileOnly"(libs.opac) { isTransitive = false }
+    "compileOnly"(libs.ledger) { isTransitive = false }
     "compileOnly"(libs.fabric.permissions.api)
     "compileOnly"(libs.errorprone.annotations)
     // Compile against the mirror's classes directory. The raw directory (rather than the source
