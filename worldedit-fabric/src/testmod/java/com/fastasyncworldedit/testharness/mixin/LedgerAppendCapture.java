@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "com.fastasyncworldedit.fabric.compat.ledger.LedgerEditBridge", remap = false)
 public abstract class LedgerAppendCapture {
     @Inject(method = "append", at = @At("HEAD"))
-    private static void worldedit$capture(ProducerBatch batch, long delayMs,
+    private void worldedit$capture(ProducerBatch batch, long delayMs,
             CallbackInfoReturnable<CompletionStage<BatchAck>> callback) {
         LedgerAuditCommands.lastBatch = batch;
     }

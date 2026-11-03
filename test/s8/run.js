@@ -3,6 +3,7 @@
 // S8 audit lane: coordinated edits against the RKC Ledger fork, checked by reading Ledger's own
 // SQLite file directly (node:sqlite), never through Ledger's code.
 
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
@@ -70,6 +71,22 @@ async function main () {
       report.checks.push({ name, passed: Boolean(condition), detail })
       if (!condition) throw new GateError(`${name}: ${JSON.stringify(detail)}`)
     }
+    // The bridge's outbox: one intent file per unpublished or unacknowledged unit, its receipt beside it.
+    const outboxDir = path.join(rig.root, 'server/world/fawe/ledger-outbox')
+    const quarantineDir = path.join(outboxDir, 'quarantine')
+    const unitsIn = dir => fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter(name => name.endsWith('.intent.json')).map(name => name.slice(0, -'.intent.json'.length))
+      : []
+    const unitFile = (dir, id, kind) => path.join(dir, `${id}.${kind}.json`)
+    const readUnit = id => ({
+      id,
+      intent: fs.readFileSync(unitFile(outboxDir, id, 'intent'), 'utf8'),
+      receipt: fs.existsSync(unitFile(outboxDir, id, 'receipt')) ? fs.readFileSync(unitFile(outboxDir, id, 'receipt'), 'utf8') : null
+    })
+    const opRows = operation => query(dbFile, `${ROWS} WHERE ai.action_identifier = 'fawe-block'`)
+      .filter(row => JSON.parse(row.extra).operation === operation)
+    // Units the contract leaves journaled for the restart checks.
+    const held = {}
     await smoke(rig, repo, workspace, profile, undefined, {
       jvmArgs: ['-Dfawe.experimental.coordinated=true'],
       async configureServer (serverDir) {
@@ -232,27 +249,119 @@ async function main () {
         check('fawe-admission-drained', faweRows().length === preStall + 8 * 4 &&
           query(dbFile, `${ROWS} WHERE a.x BETWEEN ? AND ? AND ai.action_identifier = 'fawe-block'`, cell(8), cell(8) + 3).length === 0,
           { rows: faweRows().length - preStall })
+
+        // 8. Acknowledged units leave nothing behind in the outbox.
+        check('outbox-cleared', unitsIn(outboxDir).length === 0, unitsIn(outboxDir))
+
+        // 9. Full disk: the intent cannot be journaled, so the edit is refused before any write; once the
+        // disk takes writes again the same edit goes through.
+        await send('fill 3344 80 3204 3347 80 3204 minecraft:air')
+        const preDisk = faweRows().length
+        await audit('diskfull on')
+        await select(3344, 80, 3204, 3347, 80, 3204)
+        await chatCommand('fawe-coordinated set stone', /Coordinated edit REFUSED for chunk 209,200; no changes were written: Ledger audit outbox could not record the intent: No space left on device/)
+        await expected(3344, 80, 3204, 'minecraft:air')
+        check('disk-full-refused', faweRows().length === preDisk && unitsIn(outboxDir).length === 0,
+          { rows: faweRows().length - preDisk, units: unitsIn(outboxDir) })
+        await audit('diskfull off')
+        await chatCommand('fawe-coordinated set stone', /Coordinated edit complete: 4 changes/)
+        check('disk-full-recovered', faweRows().length === preDisk + 4 && unitsIn(outboxDir).length === 0,
+          { rows: faweRows().length - preDisk, units: unitsIn(outboxDir) })
+
+        // 10. Database outage: the edit publishes, its intent and receipt stay journaled and no row is
+        // written; once Ledger answers again the rows land and the outbox clears.
+        await send('fill 3344 80 3206 3347 80 3206 minecraft:air')
+        const preOutage = faweRows().length
+        await audit('dbdown on')
+        await select(3344, 80, 3206, 3347, 80, 3206)
+        await chatCommand('fawe-coordinated set stone', /Coordinated edit admitted/)
+        await rig.wait('receipt journaled during the outage', () => unitsIn(outboxDir).some(id => readUnit(id).receipt), 30000, [client.entry])
+        held.acknowledged = readUnit(unitsIn(outboxDir)[0])
+        const outageIntent = JSON.parse(held.acknowledged.intent)
+        const outageReceipt = JSON.parse(held.acknowledged.receipt)
+        await expected(3344, 80, 3206, 'minecraft:stone')
+        check('db-outage-held', faweRows().length === preOutage && unitsIn(outboxDir).length === 1 &&
+          outageReceipt.applied.length === 4 && outageIntent.deltas.length === 4 &&
+          outageIntent.deltas.every(delta => delta.before.id === 'minecraft:air' && delta.after.id === 'minecraft:stone'),
+          { rows: faweRows().length - preOutage, intent: outageIntent, receipt: outageReceipt })
+        await audit('dbdown off')
+        await rig.wait('outage rows committed', () => faweRows().length === preOutage + 4 && unitsIn(outboxDir).length === 0, 60000, [client.entry])
+        const outageRows = opRows(outageIntent.origin.operation)
+        check('db-outage-drained', outageRows.length === 4 && outageRows.every(row => row.player === name), outageRows)
+
+        // 11. Another outage holds unit B when the server stops; beforeStop journals crafted units beside it.
+        await send('fill 3344 80 3208 3347 80 3208 minecraft:air')
+        await audit('dbdown on')
+        await select(3344, 80, 3208, 3347, 80, 3208)
+        await chatCommand('fawe-coordinated set stone', /Coordinated edit admitted/)
+        await rig.wait('receipt journaled for the held unit', () => unitsIn(outboxDir).some(id => readUnit(id).receipt), 30000, [client.entry])
+        held.pending = readUnit(unitsIn(outboxDir)[0])
+        check('held-unit-journaled', unitsIn(outboxDir).length === 1 &&
+          opRows(JSON.parse(held.pending.intent).origin.operation).length === 0, held.pending.id)
         rig.results.push({ gate: 's8-audit-ingestion', status: 'passed', checks: report.checks.map(entry => entry.name) })
       },
-      async beforeStop () {
+      // Crafted from the held unit's real files: an intent over cells still at before (never published),
+      // an intent with no receipt over cells already at after, and a receipt over cells a later edit
+      // changed; plus the acknowledged unit's files restored after a later edit at its cells.
+      async beforeStop (rig, send) {
+        await send('fill 3360 80 3210 3363 80 3210 minecraft:air')
+        await send('fill 3364 80 3210 3367 80 3210 minecraft:stone')
+        await send('fill 3368 80 3210 3371 80 3210 minecraft:gold_block')
+        await send('setblock 3344 80 3206 minecraft:gold_block')
+        const craft = (x, withReceipt) => {
+          const id = crypto.randomUUID()
+          const intent = JSON.parse(held.pending.intent)
+          intent.id = id
+          intent.origin.operation = crypto.randomUUID()
+          intent.chunkX = x >> 4
+          for (const delta of intent.deltas) {
+            delta.x += x - 3344
+            delta.z = 3210
+          }
+          fs.writeFileSync(unitFile(outboxDir, id, 'intent'), JSON.stringify(intent))
+          if (withReceipt) fs.writeFileSync(unitFile(outboxDir, id, 'receipt'), JSON.stringify({ ...JSON.parse(held.pending.receipt), id }))
+          return { id, operation: intent.origin.operation }
+        }
+        held.unpublished = craft(3360, false)
+        held.unreceipted = craft(3364, false)
+        held.overwritten = craft(3368, true)
+        for (const kind of ['intent', 'receipt']) fs.writeFileSync(unitFile(outboxDir, held.acknowledged.id, kind), held.acknowledged[kind])
         report.beforeRestart = {
           rows: query(dbFile, 'SELECT count(*) AS n FROM actions')[0].n,
           receipts: query(dbFile, 'SELECT count(*) AS n FROM producer_receipts')[0].n,
-          batches: query(dbFile, 'SELECT count(*) AS n FROM producer_batches')[0].n
+          batches: query(dbFile, 'SELECT count(*) AS n FROM producer_batches')[0].n,
+          units: unitsIn(outboxDir)
         }
       },
-      // Acknowledged rows and keys survive a restart, and the bridge records again afterwards.
+      // Recovery finishes every journaled unit, acknowledged keys survive, and Ledger records again.
       async restart (rig, send) {
         const audit = async words => JSON.parse(await send(`faweaudit ${words}`))
         await rig.wait('Ledger accepting after restart', async () => (await audit('ready')).ready, 60000)
+        await rig.wait('outbox recovered', () => unitsIn(outboxDir).length === 0, 60000)
+        const quarantined = unitsIn(quarantineDir)
+        const reasons = Object.fromEntries(quarantined.map(id =>
+          [id, fs.readFileSync(path.join(quarantineDir, `${id}.reason.txt`), 'utf8').trim()]))
+        const pending = JSON.parse(held.pending.intent).origin.operation
+        const acknowledged = JSON.parse(held.acknowledged.intent).origin.operation
         const after = {
           receipts: query(dbFile, 'SELECT count(*) AS n FROM producer_receipts')[0].n,
           batches: query(dbFile, 'SELECT count(*) AS n FROM producer_batches')[0].n,
           schema: query(dbFile, "SELECT version FROM ledger_schema_versions WHERE component = 'producer_batches'")
         }
-        check('restart-keys-kept', after.receipts === report.beforeRestart.receipts &&
-          after.batches === report.beforeRestart.batches && after.schema.length === 1 && after.schema[0].version === 1,
+        check('restart-keys-kept', after.receipts === report.beforeRestart.receipts + 4 &&
+          after.batches === report.beforeRestart.batches + 1 && after.schema.length === 1 && after.schema[0].version === 1,
           { before: report.beforeRestart, after })
+        check('restart-recorded-resubmitted', opRows(pending).length === 4 && !quarantined.includes(held.pending.id),
+          { rows: opRows(pending).length, quarantined })
+        check('restart-acknowledged-cleaned', opRows(acknowledged).length === 4 && !quarantined.includes(held.acknowledged.id),
+          { rows: opRows(acknowledged).length, quarantined })
+        check('restart-unpublished-dropped', opRows(held.unpublished.operation).length === 0 &&
+          !quarantined.includes(held.unpublished.id) && (await send('execute if block 3360 80 3210 minecraft:air')) === 'Test passed',
+          { quarantined })
+        check('restart-ambiguous-quarantined', quarantined.length === 2 &&
+          [held.unreceipted, held.overwritten].every(unit => quarantined.includes(unit.id) && opRows(unit.operation).length === 0) &&
+          /intent without receipt but the world changed/.test(reasons[held.unreceipted.id]) &&
+          /receipt recorded but the world differs/.test(reasons[held.overwritten.id]), { quarantined, reasons })
         const started = await audit('contract')
         const contract = await pollResult(rig, audit, 'contract')
         check('restart-ledger-contract', JSON.stringify(contract.result?.first?.accepted) === '[0,1]' &&

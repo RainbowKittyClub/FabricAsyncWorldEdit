@@ -32,6 +32,9 @@ import net.minecraft.world.level.block.entity.ChestBlockEntity;
 public final class LedgerAuditCommands {
     /** Set by the LedgerAppendCapture mixin: the bridge's most recent batch, as sent. */
     public static volatile ProducerBatch lastBatch;
+    /** Read by the LedgerOutboxFault and LedgerOutageFault mixins; reset by every restart. */
+    public static volatile boolean diskFull;
+    public static volatile boolean databaseDown;
     private static final Map<String, Object> RESULTS = new ConcurrentHashMap<>();
     private static final Gson GSON = new Gson();
 
@@ -108,6 +111,14 @@ public final class LedgerAuditCommands {
                 track("fill", CompletableFuture.allOf(sent.toArray(CompletableFuture[]::new))
                         .thenApply(ignored -> sent.stream().map(CompletableFuture::join).toList()));
                 return GSON.toJson(Map.of("started", "fill", "batches", batches));
+            }
+            case "diskfull" -> {
+                diskFull = words[1].equals("on");
+                return GSON.toJson(Map.of("diskFull", diskFull));
+            }
+            case "dbdown" -> {
+                databaseDown = words[1].equals("on");
+                return GSON.toJson(Map.of("databaseDown", databaseDown));
             }
             case "result" -> {
                 Object result = RESULTS.get(words[1]);
