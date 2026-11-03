@@ -159,6 +159,10 @@ public final class PublicationProbe implements ModInitializer {
             case "stats" -> {
                 return new Gson().toJson(FabricEdits.get(server).publicationStatistics());
             }
+            case "fault-skip-reconcile" -> {
+                BridgeFaults.skipReconcile = Boolean.parseBoolean(words[1]);
+                return new Gson().toJson(Map.of("skipReconcile", BridgeFaults.skipReconcile));
+            }
             case "fixture" -> {
                 require(current == null || current.future == null || current.future.isDone(), "Previous operation active");
                 current = new Run(nextChunk, words[1]);
