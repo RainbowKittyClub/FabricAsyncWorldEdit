@@ -466,6 +466,8 @@ public final class FabricCommitCoordinator {
     private void finalizeUnit(Pending unit, ServerLevel level, CommitReceipt receipt, Throwable writeFailure) {
         CompletionStage<Void> finalized = CompletableFuture.completedFuture(null);
         var finalizationFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>(writeFailure);
+        // Client sync follows world maintenance only; detached history failures must not race it.
+        var maintenanceFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>(writeFailure);
         var historyFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         CompletionStage<Void> writtenHistory = CompletableFuture.completedFuture(null).thenComposeAsync(
                 unused -> Objects.requireNonNull(unit.operation.history.apply(receipt)), detachedExecutor)
@@ -485,12 +487,15 @@ public final class FabricCommitCoordinator {
                 finalized = finalized.thenCombine(maintenance, (left, right) -> null);
             }
             finalized = finalized.handle((unused, failure) -> {
-                if (failure != null) finalizationFailure.compareAndSet(null, failure);
+                if (failure != null) {
+                    maintenanceFailure.compareAndSet(null, failure);
+                    finalizationFailure.compareAndSet(null, failure);
+                }
                 return (Void) null;
-            }).thenCompose(unused -> access.completePublication(level, receipt, finalizationFailure.get() == null))
+            }).thenCompose(unused -> access.completePublication(level, receipt, maintenanceFailure.get() == null))
                     .thenCompose(unused -> {
                         owner();
-                        if (unit.terminal || finalizationFailure.get() != null) return CompletableFuture.completedFuture(null);
+                        if (unit.terminal || maintenanceFailure.get() != null) return CompletableFuture.completedFuture(null);
                         CompletionStage<Void> publication = CompletableFuture.completedFuture(null);
                         for (EditIntegration.Reservation reservation : unit.reservations) {
                             CompletionStage<Void> stage;
