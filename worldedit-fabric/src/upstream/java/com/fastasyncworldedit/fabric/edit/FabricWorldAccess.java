@@ -96,8 +96,25 @@ public final class FabricWorldAccess {
         }
         var values = attachments.fabric_getAttachments();
         if (values != null && !values.isEmpty()) {
-            throw new UnsupportedOperationException("Attachment lifecycle/restore codecs are not installed");
+            var ids = values.keySet().stream().map(type -> type.identifier().toString()).sorted().toList();
+            throw new UnsupportedOperationException("Attachment lifecycle/restore codecs are not installed for "
+                    + describe(target) + " " + ids);
         }
+    }
+
+    private static String describe(Object target) {
+        if (target instanceof LevelChunk chunk) {
+            return "chunk " + chunk.getPos().x() + "," + chunk.getPos().z();
+        }
+        if (target instanceof net.minecraft.world.level.block.entity.BlockEntity blockEntity) {
+            BlockPos pos = blockEntity.getBlockPos();
+            return "block entity at " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        }
+        if (target instanceof net.minecraft.world.entity.Entity entity) {
+            BlockPos pos = entity.blockPosition();
+            return "entity " + entity.getUUID() + " at " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        }
+        return target.getClass().getSimpleName();
     }
 
     /** Compare every declared dependency plus every intended before-value immediately before commit. */

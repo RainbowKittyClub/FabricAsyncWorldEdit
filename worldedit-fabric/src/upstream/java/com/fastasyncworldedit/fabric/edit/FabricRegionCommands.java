@@ -124,10 +124,11 @@ public final class FabricRegionCommands {
                                 throw new IllegalStateException("Coordinated command stopped after partial, denied or conflicting work");
                             }
                             return receipts;
-                        }).whenComplete((value, failure) -> permissions.remove(unitContext.operationId()));
+                        }).whenComplete((value, failure) -> permissions.remove(unitContext.operationId()))
+                                .exceptionally(failure -> { throw new UnitFailure(chunk, failure); });
                             } catch (Throwable failure) {
                                 permissions.remove(unitContext.operationId());
-                                return CompletableFuture.<List<CommitReceipt>>failedFuture(failure);
+                                return CompletableFuture.<List<CommitReceipt>>failedFuture(new UnitFailure(chunk, failure));
                             }
                         }).toCompletableFuture();
                     }
@@ -146,18 +147,27 @@ public final class FabricRegionCommands {
                             receipt -> receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN);
                     CommitReceipt refusal = history.size() == 0 && unknown == null
                             ? receiptMatching(failure, FabricRegionCommands::isPreWriteRefusal) : null;
+                    UnitFailure unpublished = history.size() == 0 && unknown == null && refusal == null
+                            && publishedNothing(failure) ? unitFailure(failure) : null;
                     if (refusal != null) {
                         source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
                                 + refusal.chunkX() + "," + refusal.chunkZ()
                                 + "; no changes were written: " + refusalReason(refusal)));
+                    } else if (unpublished != null) {
+                        // The operation itself reports publishing nothing, so it failed in preparation.
+                        source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
+                                + unpublished.chunk.x() + "," + unpublished.chunk.z()
+                                + "; no changes were written: " + rootMessage(unpublished)));
                     } else if (unknown != null) {
                         source.sendFailure(Component.literal("Coordinated edit failed: chunk "
                                 + unknown.chunkX() + "," + unknown.chunkZ() + " was written but could not be"
                                 + " read back, so it is quarantined; at least " + history.size()
-                                + " recorded changes: " + failure));
+                                + " recorded changes: " + rootMessage(failure)));
                     } else {
+                        UnitFailure unit = unitFailure(failure);
                         source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
-                                + " recorded changes: " + failure));
+                                + " recorded changes" + (unit == null ? "" : " in chunk " + unit.chunk.x() + ","
+                                + unit.chunk.z()) + ": " + rootMessage(failure)));
                     }
                 }
             }));
@@ -183,6 +193,42 @@ public final class FabricRegionCommands {
             }
         }
         return null;
+    }
+
+    /** A unit's failure tagged with its chunk, so a refusal before any receipt can still name it. */
+    private static final class UnitFailure extends RuntimeException {
+        private final BlockVector2 chunk;
+
+        private UnitFailure(BlockVector2 chunk, Throwable cause) {
+            super("Coordinated unit for chunk " + chunk.x() + "," + chunk.z() + " failed", cause);
+            this.chunk = chunk;
+        }
+    }
+
+    // Positive evidence only: an operation failure with no published receipt and no commit failure.
+    private static boolean publishedNothing(Throwable failure) {
+        boolean operation = false;
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof FabricCommitCoordinator.CommitFailure) return false;
+            if (current instanceof FabricEdits.OperationFailure failed) {
+                if (!failed.publishedReceipts().isEmpty()) return false;
+                operation = true;
+            }
+        }
+        return operation;
+    }
+
+    private static UnitFailure unitFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof UnitFailure unit) return unit;
+        }
+        return null;
+    }
+
+    private static String rootMessage(Throwable failure) {
+        Throwable root = failure;
+        while (root.getCause() != null) root = root.getCause();
+        return root.getMessage() != null ? root.getMessage() : root.getClass().getSimpleName();
     }
 
     private static boolean isPreWriteRefusal(CommitReceipt receipt) {
