@@ -1,6 +1,7 @@
 package com.fastasyncworldedit.fabric.compat.ledger;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
@@ -27,20 +28,29 @@ final class LedgerPayloads {
     private LedgerPayloads() {
     }
 
-    static AbstractActionType action(EditActorContext context, long sequence, EditDelta delta, Instant timestamp) {
+    /** The provenance a row needs; stored in the outbox so recovery rebuilds identical rows. */
+    record Origin(String dimension, UUID actorId, String actorName, UUID operation, UUID parent,
+            String source) {
+        static Origin of(EditActorContext context) {
+            return new Origin(context.dimension(), context.actorId(), context.actorName(),
+                    context.operationId(), context.parentId(), context.source().name());
+        }
+    }
+
+    static AbstractActionType action(Origin origin, long sequence, EditDelta delta, Instant timestamp) {
         AbstractActionType action = switch (delta.kind()) {
             case BLOCK -> block(delta);
             case BIOME -> biome(delta);
             default -> throw new IllegalArgumentException("Ledger bridge does not record " + delta.kind());
         };
         action.setPos(new BlockPos(delta.x(), delta.y(), delta.z()));
-        action.setWorld(Identifier.parse(context.dimension()));
+        action.setWorld(Identifier.parse(origin.dimension()));
         action.setTimestamp(timestamp);
         action.setSourceName(SOURCE);
-        if (context.actorId() != null && context.actorName() != null) {
-            action.setSourceProfile(new NameAndId(context.actorId(), context.actorName()));
+        if (origin.actorId() != null && origin.actorName() != null) {
+            action.setSourceProfile(new NameAndId(origin.actorId(), origin.actorName()));
         }
-        action.setExtraData(extra(context, sequence, delta));
+        action.setExtraData(extra(origin, sequence, delta));
         return action;
     }
 
@@ -72,14 +82,14 @@ final class LedgerPayloads {
         return tag == null ? null : tag.toString();
     }
 
-    private static String extra(EditActorContext context, long sequence, EditDelta delta) {
+    private static String extra(Origin origin, long sequence, EditDelta delta) {
         JsonObject extra = new JsonObject();
         extra.addProperty("format", FORMAT);
         extra.addProperty("kind", delta.kind().name());
-        extra.addProperty("operation", context.operationId().toString());
-        extra.addProperty("parent", context.parentId() == null ? null : context.parentId().toString());
+        extra.addProperty("operation", origin.operation().toString());
+        extra.addProperty("parent", origin.parent() == null ? null : origin.parent().toString());
         extra.addProperty("sequence", sequence);
-        extra.addProperty("source", context.source().name());
+        extra.addProperty("source", origin.source());
         extra.add("before", side(delta.before()));
         extra.add("after", side(delta.after()));
         return extra.toString();

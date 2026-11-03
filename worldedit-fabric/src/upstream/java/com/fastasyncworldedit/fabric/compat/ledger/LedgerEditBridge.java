@@ -2,8 +2,11 @@ package com.fastasyncworldedit.fabric.compat.ledger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -12,28 +15,39 @@ import com.fastasyncworldedit.fabric.compat.EditIntegration;
 import com.fastasyncworldedit.fabric.edit.CommitReceipt;
 import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
+import com.fastasyncworldedit.fabric.edit.FabricWorldAccess;
 import com.fastasyncworldedit.fabric.edit.PreparedChunkEdit;
 import com.github.quiltservertools.ledger.api.BatchAck;
 import com.github.quiltservertools.ledger.api.LedgerApi;
 import com.github.quiltservertools.ledger.api.ProducerBatch;
 import com.github.quiltservertools.ledger.api.ProducerBatchException;
+import com.sk89q.worldedit.internal.util.LogManagerCompat;
+import org.apache.logging.log4j.Logger;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 
 /**
- * Durable Ledger audit for coordinated edits. Every row a proposal would write is validated before
- * publication; after publication the actual applied deltas go to Ledger's acknowledged producer
- * batch API, keyed by (fawe, operation, sequence). Audit is required: an installed Ledger without
- * that API refuses every coordinated edit rather than letting one go unrecorded.
+ * Durable Ledger audit for coordinated edits. Before publication every row is validated and the
+ * intent journaled in the world's outbox; after it the receipt is journaled and the applied deltas
+ * go to Ledger's acknowledged producer batch API, keyed by (fawe, operation, sequence). Restart
+ * recovery ({@link LedgerRecovery}) finishes what a stop or crash left. Audit is required: a Ledger
+ * without the producer API, a failed outbox write or unfinished recovery refuses the edit.
  */
 public final class LedgerEditBridge implements EditIntegration {
     static final int REQUIRED_API_VERSION = 1;
+    private static final Logger LOGGER = LogManagerCompat.getLogger();
     private static final long FIRST_RETRY_MS = 250;
     private static final long MAX_RETRY_MS = 5_000;
 
     // Null when the installed Ledger supports the producer batch contract.
     private final String incompatibility;
+    private LedgerOutbox outbox;
+    private volatile boolean stopping;
+    // Null once recovery finished; otherwise why proposals are refused.
+    private volatile String notReady = "the Ledger audit bridge has not started";
 
     public LedgerEditBridge() {
         this.incompatibility = incompatibility();
@@ -53,31 +67,65 @@ public final class LedgerEditBridge implements EditIntegration {
     }
 
     @Override
+    public void start(MinecraftServer server, FabricWorldAccess access) {
+        if (incompatibility != null) {
+            return;
+        }
+        outbox = new LedgerOutbox(server.getWorldPath(LevelResource.ROOT).resolve("fawe").resolve("ledger-outbox"));
+        notReady = "Ledger audit recovery is still running";
+        new LedgerRecovery(server, access, outbox, batch -> append(batch, FIRST_RETRY_MS), () -> stopping).run()
+                .whenComplete((unused, failure) -> {
+                    if (failure == null) {
+                        notReady = null;
+                    } else {
+                        notReady = "Ledger audit recovery failed: " + failure.getMessage();
+                        LOGGER.warn("{}; audited edits stay refused until restart", notReady, failure);
+                    }
+                });
+    }
+
+    @Override
+    public void stop() {
+        stopping = true;
+    }
+
+    @Override
     public CompletionStage<Reservation> prepare(PreparedChunkEdit proposal) {
         if (incompatibility != null) {
-            return CompletableFuture.failedFuture(new IllegalStateException(
-                    "Ledger audit is required but " + incompatibility + "; no writes were made"));
+            return refuse("Ledger audit is required but " + incompatibility);
+        }
+        String waiting = notReady;
+        if (waiting != null) {
+            return refuse(waiting);
         }
         LedgerApi api = LedgerApi.get();
-        long changes = proposal.writes().stream().filter(delta -> !delta.isNoOp()).count();
-        if (changes > api.producerBatchLimit()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Ledger records at most "
-                    + api.producerBatchLimit() + " changes per chunk edit, this one has " + changes
-                    + "; no writes were made"));
+        List<EditDelta> changes = proposal.writes().stream().filter(delta -> !delta.isNoOp()).toList();
+        if (changes.size() > api.producerBatchLimit()) {
+            return refuse("Ledger records at most " + api.producerBatchLimit() + " changes per chunk edit, this one has "
+                    + changes.size());
         }
+        LedgerPayloads.Origin origin = LedgerPayloads.Origin.of(proposal.context());
         Instant probe = Instant.now();
-        for (EditDelta delta : proposal.writes()) {
-            if (delta.isNoOp()) continue;
+        for (EditDelta delta : changes) {
             // The longest sequence, so a row that fits now still fits whatever sequence it gets.
-            String refusal = api.validateProducerAction(
-                    LedgerPayloads.action(proposal.context(), Long.MAX_VALUE, delta, probe));
+            String refusal = api.validateProducerAction(LedgerPayloads.action(origin, Long.MAX_VALUE, delta, probe));
             if (refusal != null) {
-                return CompletableFuture.failedFuture(new IllegalStateException("Ledger would not record the "
-                        + delta.kind().name().toLowerCase() + " change at " + delta.x() + "," + delta.y() + ","
-                        + delta.z() + ": " + refusal + "; no writes were made"));
+                return refuse("Ledger would not record the " + delta.kind().name().toLowerCase() + " change at "
+                        + delta.x() + "," + delta.y() + "," + delta.z() + ": " + refusal);
             }
         }
-        return CompletableFuture.completedFuture(new LedgerReservation());
+        var reservation = new LedgerReservation(UUID.randomUUID(), origin, changes);
+        if (changes.isEmpty()) {
+            return CompletableFuture.completedFuture(reservation);
+        }
+        return outbox.writeIntent(new LedgerOutbox.Unit(reservation.id, origin, proposal.chunkX(), proposal.chunkZ(),
+                changes, null)).handle((unused, failure) -> failure == null
+                        ? CompletableFuture.<Reservation>completedFuture(reservation)
+                        : refuse(rootMessage(failure))).thenCompose(stage -> stage);
+    }
+
+    private static CompletableFuture<Reservation> refuse(String reason) {
+        return CompletableFuture.failedFuture(new IllegalStateException(reason + "; no writes were made"));
     }
 
     private static String incompatibility() {
@@ -90,11 +138,32 @@ public final class LedgerEditBridge implements EditIntegration {
         }
     }
 
-    private static final class LedgerReservation implements Reservation {
+    private static String key(EditDelta delta) {
+        return delta.kind() + "/" + delta.x() + "/" + delta.y() + "/" + delta.z() + "/" + delta.key();
+    }
+
+    private final class LedgerReservation implements Reservation {
+        private final UUID id;
+        private final LedgerPayloads.Origin origin;
+        private final List<EditDelta> intent;
+        private final Map<String, Integer> index = new HashMap<>();
+
+        private LedgerReservation(UUID id, LedgerPayloads.Origin origin, List<EditDelta> intent) {
+            this.id = id;
+            this.origin = origin;
+            this.intent = intent;
+            for (int position = 0; position < intent.size(); position++) {
+                index.put(key(intent.get(position)), position);
+            }
+        }
+
+        // Revalidation: publish only deltas the journaled intent holds exactly. A changed delta is a
+        // conflict upstream, retried with a fresh proposal and so a fresh, matching intent.
         @Override
         public boolean authorize(ServerLevel level, ServerPlayer operator, EditActorContext context,
                 EditDelta actualDelta) {
-            return true;
+            Integer position = index.get(key(actualDelta));
+            return position != null && intent.get(position).equals(actualDelta);
         }
 
         @Override
@@ -106,16 +175,36 @@ public final class LedgerEditBridge implements EditIntegration {
         @Override
         public CompletionStage<Void> record(CommitReceipt receipt) {
             if (receipt.applied().isEmpty()) {
-                return CompletableFuture.completedFuture(null);
+                return intent.isEmpty() ? CompletableFuture.completedFuture(null) : outbox.remove(id);
             }
             Instant timestamp = Instant.now();
+            List<LedgerOutbox.Applied> applied = new ArrayList<>(receipt.applied().size());
             List<ProducerBatch.Entry> entries = new ArrayList<>(receipt.applied().size());
-            for (CommitReceipt.AppliedDelta applied : receipt.applied()) {
-                entries.add(new ProducerBatch.Entry(applied.sequence(),
-                        LedgerPayloads.action(receipt.context(), applied.sequence(), applied.delta(), timestamp)));
+            for (CommitReceipt.AppliedDelta delta : receipt.applied()) {
+                applied.add(new LedgerOutbox.Applied(delta.sequence(), index.get(key(delta.delta()))));
+                entries.add(new ProducerBatch.Entry(delta.sequence(),
+                        LedgerPayloads.action(origin, delta.sequence(), delta.delta(), timestamp)));
             }
-            ProducerBatch batch = new ProducerBatch(LedgerPayloads.SOURCE, receipt.context().operationId(), entries);
-            return append(batch, FIRST_RETRY_MS).thenApply(ack -> null);
+            ProducerBatch batch = new ProducerBatch(LedgerPayloads.SOURCE, origin.operation(), entries);
+            // A receipt that cannot be journaled does not hold the rows back; recovery then has
+            // only the intent and quarantines the unit if the server dies before Ledger acks.
+            return outbox.writeReceipt(id, new LedgerOutbox.Receipt(timestamp, applied))
+                    .exceptionally(failure -> {
+                        LOGGER.warn("Ledger audit outbox: {}", rootMessage(failure));
+                        return null;
+                    })
+                    .thenCompose(unused -> append(batch, FIRST_RETRY_MS))
+                    .handle((ack, failure) -> {
+                        if (failure == null) {
+                            return outbox.remove(id);
+                        }
+                        if (stopping) {
+                            return CompletableFuture.<Void>failedFuture(new IllegalStateException(
+                                    "Ledger rows deferred to restart recovery: " + rootMessage(failure)));
+                        }
+                        return outbox.quarantine(id, "Ledger refused the rows: " + rootMessage(failure))
+                                .thenCompose(unused -> CompletableFuture.<Void>failedFuture(failure));
+                    }).thenCompose(stage -> stage);
         }
 
         @Override
@@ -124,16 +213,21 @@ public final class LedgerEditBridge implements EditIntegration {
 
         @Override
         public void discard() {
+            if (!intent.isEmpty()) {
+                outbox.remove(id);
+            }
         }
     }
 
-    // Transient refusals retry with backoff; the unit keeps its admission slot, so FAWE admits
-    // no new work while Ledger is behind. Conflicts and invalid rows fail at once.
-    private static CompletionStage<BatchAck> append(ProducerBatch batch, long delayMs) {
+    // Transient refusals retry with backoff while the server runs; the unit keeps its admission
+    // slot, so FAWE admits no new work while Ledger is behind. Conflicts and invalid rows fail at once.
+    private CompletionStage<BatchAck> append(ProducerBatch batch, long delayMs) {
         return LedgerApi.get().appendBatch(batch).handle((ack, failure) -> {
-            if (failure == null) return CompletableFuture.completedFuture(ack);
+            if (failure == null) {
+                return CompletableFuture.completedFuture(ack);
+            }
             ProducerBatchException refused = refusal(failure);
-            if (refused != null && (refused.reason() == ProducerBatchException.Reason.BACKPRESSURE
+            if (!stopping && refused != null && (refused.reason() == ProducerBatchException.Reason.BACKPRESSURE
                     || refused.reason() == ProducerBatchException.Reason.UNAVAILABLE
                     || refused.reason() == ProducerBatchException.Reason.STOPPED)) {
                 var later = CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS);
@@ -149,5 +243,14 @@ public final class LedgerEditBridge implements EditIntegration {
             if (current instanceof ProducerBatchException refused) return refused;
         }
         return null;
+    }
+
+    private static String rootMessage(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException) && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.toString() : current.getMessage();
     }
 }

@@ -40,6 +40,7 @@ public final class FabricEdits {
     private FabricStateMapping mapping;
     private final FabricWorldAccess access;
     private final FabricCommitCoordinator coordinator;
+    private final List<com.fastasyncworldedit.fabric.compat.EditIntegration> integrations;
     private final FabricPreparationService preparation;
     private final ThreadPoolExecutor recording = executor("fawe-coordinated-recording");
     private final Map<CompletableFuture<List<CommitReceipt>>, EditActorContext> admitted = new java.util.concurrent.ConcurrentHashMap<>();
@@ -53,7 +54,9 @@ public final class FabricEdits {
         mapping = new FabricStateMapping(server);
         access = new FabricWorldAccess(server, mapping);
         preparation = new FabricPreparationService(server, access);
-        coordinator = new FabricCommitCoordinator(server, access, EditIntegrations.discover(), recording, 32, 64L << 20);
+        integrations = EditIntegrations.discover();
+        integrations.forEach(integration -> integration.start(server, access));
+        coordinator = new FabricCommitCoordinator(server, access, integrations, recording, 32, 64L << 20);
     }
 
     /** Register lifecycle hooks once, without enabling the experimental backend by default. */
@@ -469,6 +472,7 @@ public final class FabricEdits {
     private void stop() {
         owner();
         stopped = true;
+        integrations.forEach(com.fastasyncworldedit.fabric.compat.EditIntegration::stop);
         access.stop();
         synchronized (admitted) {
             admitted.values().forEach(context -> context.cancellation().cancel());

@@ -4,10 +4,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
 import com.fastasyncworldedit.fabric.edit.CommitReceipt;
+import com.fastasyncworldedit.fabric.edit.FabricWorldAccess;
 import com.fastasyncworldedit.fabric.edit.EditActorContext;
 import com.fastasyncworldedit.fabric.edit.EditDelta;
 import com.fastasyncworldedit.fabric.edit.PreparedChunkEdit;
@@ -20,6 +22,17 @@ public interface EditIntegration {
 
     /** Payload families supported by this exact provider version. */
     public Set<EditDelta.Kind> capabilities();
+
+    /**
+     * Owner thread, once per backend, before any proposal: providers with durable state recover it
+     * here and refuse proposals until done. Must not block on I/O.
+     */
+    public default void start(MinecraftServer server, FabricWorldAccess access) {
+    }
+
+    /** Owner thread, before the coordinator drains: end retries that would outlive the server. */
+    public default void stop() {
+    }
 
     /**
      * Reserve bounded resources and validate detached payloads off the owner thread.
