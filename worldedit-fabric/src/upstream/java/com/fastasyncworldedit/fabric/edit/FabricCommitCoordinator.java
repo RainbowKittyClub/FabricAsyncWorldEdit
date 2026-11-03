@@ -338,9 +338,14 @@ public final class FabricCommitCoordinator {
         ServerLevel level = null;
         try {
             if (failure != null) {
-                // Preserve the integration's refusal text (chunk/position plus reason) in the receipt.
+                // Preserve the integration's refusal text (chunk/position plus reason) in the receipt;
+                // a composed stage wraps it, and the wrapper's message is only the class name prefix.
+                Throwable refusal = failure;
+                while (refusal instanceof java.util.concurrent.CompletionException && refusal.getCause() != null) {
+                    refusal = refusal.getCause();
+                }
                 throw new IllegalStateException(INTEGRATION_REFUSAL_PREFIX
-                        + (failure.getMessage() == null ? failure.toString() : failure.getMessage()), failure);
+                        + (refusal.getMessage() == null ? refusal.toString() : refusal.getMessage()), failure);
             }
             level = access.level(proposal.context().dimension());
             unit.level = level;
