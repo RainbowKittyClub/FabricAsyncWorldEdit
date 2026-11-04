@@ -25,5 +25,11 @@ for key, suffix in [('candidate', 'dist'), ('lifecycle-probe', 'testmod')]:
     deps[key] = pin(jars[0])
 for suite in ('functional', 'operations', 'content', 'throughput'):
     manifest['profiles'][f'{suite}-base'] = ['candidate', 'fabric-api', 'lifecycle-probe']
+# The claims suite: S6's OPAC set, pinned by test/s6/pin.py, beside this lane's probe.
+s6 = json.loads((root / 'test/s6/manifest.json').read_text())
+claims = ['opac', 'forge-config', 's6-probe', 'test-permissions']
+for key in claims:
+    deps[key] = s6['availableDependencies'][key]
+manifest['profiles']['claims-opac'] = ['candidate', 'fabric-api', 'lifecycle-probe', *claims]
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))

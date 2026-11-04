@@ -112,6 +112,10 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
                                 nativeBorders();
                             } else if (words[0].equals("claim")) {
                                 claim(words[1].equals("owner") ? actor.getUUID() : OTHER);
+                            } else if (words[0].equals("claim-at")) {
+                                // claim-at player owner|stranger|none chunkX chunkZ: S11's claims fixture.
+                                claimAt(server.getPlayerList().getPlayerByName(words[1]), words[2],
+                                        Integer.parseInt(words[3]), Integer.parseInt(words[4]));
                             } else if (words[0].equals("native-reset")) {
                                 nativeReceipts.clear();
                             } else if (words[0].equals("disconnect")) {
@@ -980,6 +984,32 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
         }
         setProtected(true);
         setOption(PlayerConfigOptions.FULL_ACCESS, "P");
+    }
+
+    // One chunk for the player, the stranger or nobody, protected as claim() protects its own.
+    private static void claimAt(net.minecraft.server.level.ServerPlayer player, String who, int chunkX, int chunkZ) {
+        var api = OpenPACServerAPI.get(server);
+        var dimension = server.overworld().dimension().identifier();
+        api.getServerClaimsManager().unclaim(dimension, chunkX, chunkZ);
+        if (who.equals("none")) {
+            return;
+        }
+        UUID owner = switch (who) {
+            case "owner" -> player.getUUID();
+            case "stranger" -> OTHER;
+            default -> throw new IllegalArgumentException("Unknown claim owner " + who);
+        };
+        if (api.getServerClaimsManager().claim(dimension, owner, 0, chunkX, chunkZ, false) == null) {
+            throw new AssertionError("Claim fixture failed at " + chunkX + "," + chunkZ);
+        }
+        var config = api.getChunkProtection().getConfig(api.getServerClaimsManager().get(dimension, chunkX, chunkZ),
+                dimension);
+        config.tryToSet(PlayerConfigOptions.PROTECT_CLAIMED_CHUNKS, true);
+        config.tryToSet(PlayerConfigOptions.FULL_ACCESS, "P");
+        if (!config.getEffective(PlayerConfigOptions.PROTECT_CLAIMED_CHUNKS)
+                || !config.getEffective(PlayerConfigOptions.FULL_ACCESS).equals("P")) {
+            throw new AssertionError("Claim fixture policy did not take effect at " + chunkX + "," + chunkZ);
+        }
     }
 
     // Require fixture changes to be effective; never substitute a weaker configuration on failure.
