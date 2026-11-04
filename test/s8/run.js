@@ -126,6 +126,12 @@ async function main () {
         await send('fill 3199 79 3199 3210 79 3201 minecraft:stone')
         await send('fill 3200 80 3200 3209 80 3200 minecraft:air')
         const before = { fawe: faweRows().length, receipts: receipts().length }
+        const ordinaryAt = (x1, x2, z) => query(dbFile,
+          `${ROWS} WHERE ai.action_identifier NOT LIKE 'fawe-%' AND a.x BETWEEN ? AND ? AND a.y = 80 AND a.z = ?`, x1, x2, z).length
+        // Ledger's ordinary queue commits every 10 ticks; let it settle before counting.
+        const settle = () => new Promise(resolve => setTimeout(resolve, 3000))
+        await settle()
+        const ordinaryBefore = ordinaryAt(3200, 3203, 3200)
 
         // 1. Exact applied rows: actor, source, states, both sides, keys and one batch receipt.
         await select(3200, 80, 3200, 3203, 80, 3200)
@@ -144,6 +150,10 @@ async function main () {
           new Set(keys.map(key => key.batch)).size === 1 &&
           JSON.stringify(keys.map(key => key.sequence).sort()) === JSON.stringify(extras.map(extra => extra.sequence).sort()) &&
           JSON.stringify(keys.map(key => key.action).sort()) === JSON.stringify(set.map(row => row.id).sort()), keys)
+        // Ordinary logging stays on, yet does not log the bridge's write a second time.
+        await settle()
+        check('no-double-logging', ordinaryAt(3200, 3203, 3200) === ordinaryBefore,
+          { before: ordinaryBefore, after: ordinaryAt(3200, 3203, 3200) })
 
         // 2. NBT-bearing change: the chest's items survive in the before side; stone over stone adds nothing.
         await send('setblock 3200 80 3200 minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:diamond",count:5}]}')
@@ -250,6 +260,25 @@ async function main () {
           query(dbFile, `${ROWS} WHERE a.x BETWEEN ? AND ? AND ai.action_identifier = 'fawe-block'`, cell(8), cell(8) + 3).length === 0,
           { rows: faweRows().length - preStall })
 
+        // 7c. Denied: chunk 200,200 is claimed for a stranger. An edit across chunks 199 and 200 writes
+        // and logs only cells OPAC allows; a denied cell stays unchanged with no row and no key.
+        await audit('claim stranger')
+        await send('fill 3196 80 3212 3203 80 3212 minecraft:air')
+        const preDenied = receipts().length
+        await select(3196, 80, 3212, 3203, 80, 3212)
+        await chatCommand('fawe-coordinated set stone', /Coordinated edit (complete|failed|REFUSED)/)
+        await rig.wait('denied edit settled', () => unitsIn(outboxDir).length === 0, 30000, [client.entry])
+        for (let x = 3200; x <= 3203; x++) await expected(x, 80, 3212, 'minecraft:air')
+        let allowedStone = 0
+        for (let x = 3196; x <= 3199; x++) if ((await send(`execute if block ${x} 80 3212 minecraft:stone`)) === 'Test passed') allowedStone++
+        const fawe3212 = (x1, x2) => query(dbFile, `${ROWS} WHERE ai.action_identifier = 'fawe-block' AND a.x BETWEEN ? AND ? AND a.z = 3212`, x1, x2).length
+        check('denied-no-rows', fawe3212(3200, 3203) === 0 && fawe3212(3196, 3199) === allowedStone &&
+          receipts().length - preDenied === allowedStone,
+          { deniedRows: fawe3212(3200, 3203), allowedRows: fawe3212(3196, 3199), allowedStone, keys: receipts().length - preDenied })
+
+        // 7d. Ledger's own search shows the bridge's rows with their registered description.
+        await chatCommand('ledger search action:fawe-block', / edited /)
+
         // 8. Acknowledged units leave nothing behind in the outbox.
         check('outbox-cleared', unitsIn(outboxDir).length === 0, unitsIn(outboxDir))
 
@@ -289,11 +318,37 @@ async function main () {
         const outageRows = opRows(outageIntent.origin.operation)
         check('db-outage-drained', outageRows.length === 4 && outageRows.every(row => row.player === name), outageRows)
 
-        // 11. Another outage holds unit B when the server stops; beforeStop journals crafted units beside it.
+        // 10b. A real database outage: this test holds SQLite's write lock, so Ledger's commit fails busy
+        // and Ledger retries; the unit stays journaled with no rows until the lock is released.
+        await send('fill 3352 80 3206 3355 80 3206 minecraft:air')
+        const preLock = faweRows().length
+        const lock = new DatabaseSync(dbFile, { timeout: 10000 })
+        lock.exec('BEGIN IMMEDIATE')
+        try {
+          await select(3352, 80, 3206, 3355, 80, 3206)
+          await chatCommand('fawe-coordinated set stone', /Coordinated edit admitted/)
+          await rig.wait('receipt journaled under the lock', () => unitsIn(outboxDir).some(id => readUnit(id).receipt), 30000, [client.entry])
+          // Past sqlite-jdbc's 3 s busy timeout, so Ledger's attempt has really failed.
+          await new Promise(resolve => setTimeout(resolve, 10000))
+          check('db-lock-held', faweRows().length === preLock && unitsIn(outboxDir).length === 1,
+            { rows: faweRows().length - preLock, units: unitsIn(outboxDir) })
+        } finally {
+          lock.exec('ROLLBACK')
+          lock.close()
+        }
+        const released = Date.now()
+        await rig.wait('rows committed after the lock', () => faweRows().length === preLock + 4 && unitsIn(outboxDir).length === 0,
+          420000, [client.entry])
+        report.lockRecoveryMs = Date.now() - released
+        check('db-lock-drained', faweRows().length === preLock + 4 && unitsIn(outboxDir).length === 0,
+          { rows: faweRows().length - preLock, recoveryMs: report.lockRecoveryMs })
+
+        // 11. Another outage holds unit B, a chest placement, when the server stops; beforeStop
+        // journals crafted units beside it. Its read-back NBT must match the world after restart.
         await send('fill 3344 80 3208 3347 80 3208 minecraft:air')
         await audit('dbdown on')
         await select(3344, 80, 3208, 3347, 80, 3208)
-        await chatCommand('fawe-coordinated set stone', /Coordinated edit admitted/)
+        await chatCommand('fawe-coordinated set chest', /Coordinated edit admitted/)
         await rig.wait('receipt journaled for the held unit', () => unitsIn(outboxDir).some(id => readUnit(id).receipt), 30000, [client.entry])
         held.pending = readUnit(unitsIn(outboxDir)[0])
         check('held-unit-journaled', unitsIn(outboxDir).length === 1 &&
@@ -351,8 +406,9 @@ async function main () {
         check('restart-keys-kept', after.receipts === report.beforeRestart.receipts + 4 &&
           after.batches === report.beforeRestart.batches + 1 && after.schema.length === 1 && after.schema[0].version === 1,
           { before: report.beforeRestart, after })
-        check('restart-recorded-resubmitted', opRows(pending).length === 4 && !quarantined.includes(held.pending.id),
-          { rows: opRows(pending).length, quarantined })
+        check('restart-recorded-resubmitted', opRows(pending).length === 4 && !quarantined.includes(held.pending.id) &&
+          opRows(pending).every(row => row.object === 'minecraft:chest' && /minecraft:chest/.test(JSON.parse(row.extra).after.nbt || '')),
+          { rows: opRows(pending), quarantined, reasons })
         check('restart-acknowledged-cleaned', opRows(acknowledged).length === 4 && !quarantined.includes(held.acknowledged.id),
           { rows: opRows(acknowledged).length, quarantined })
         check('restart-unpublished-dropped', opRows(held.unpublished.operation).length === 0 &&

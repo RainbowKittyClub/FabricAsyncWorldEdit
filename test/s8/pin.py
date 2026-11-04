@@ -31,7 +31,11 @@ with zipfile.ZipFile(LEDGER) as archive:
 if '-rkc.' not in version:
     raise RuntimeError(f'{LEDGER} is not the RKC Ledger fork ({version})')
 deps['ledger-rkc'] = pin(LEDGER)
-manifest['profiles']['audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', 'ledger-rkc', 'kotlin', 'universal-ledger']
+# OPAC decides denied edits; its config library is pinned by the S6 lane, rehashed here.
+s6 = json.loads((root / 'test/s6/manifest.json').read_text())
+deps['forge-config'] = pin(Path(s6['availableDependencies']['forge-config']['path']))
+manifest['profiles']['audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', 'ledger-rkc', 'kotlin', 'universal-ledger',
+                                 'opac', 'forge-config']
 manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles'] if name != 'audit']
 (root / 'test/s8/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe', 'ledger-rkc')}))

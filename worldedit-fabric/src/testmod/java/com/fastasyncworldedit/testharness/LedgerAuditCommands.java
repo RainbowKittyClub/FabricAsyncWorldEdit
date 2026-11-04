@@ -112,6 +112,10 @@ public final class LedgerAuditCommands {
                         .thenApply(ignored -> sent.stream().map(CompletableFuture::join).toList()));
                 return GSON.toJson(Map.of("started", "fill", "batches", batches));
             }
+            case "claim" -> {
+                LedgerClaimFixture.claimForStranger(level.getServer());
+                return GSON.toJson(Map.of("claimed", "200,200"));
+            }
             case "diskfull" -> {
                 diskFull = words[1].equals("on");
                 return GSON.toJson(Map.of("diskFull", diskFull));
