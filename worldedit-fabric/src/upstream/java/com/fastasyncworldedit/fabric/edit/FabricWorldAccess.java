@@ -174,6 +174,11 @@ public final class FabricWorldAccess {
         validatePayloads(proposal, level);
     }
 
+    /** Whether a block type, by registry id, has verified lifecycle support. */
+    public static boolean lifecycleSupported(String blockId) {
+        return SUPPORTED_BLOCKS.contains(blockId);
+    }
+
     /** The lifecycle refusal this delta would meet at publication, or null. */
     public UnsupportedBlockException unsupported(EditDelta delta) {
         if (delta.kind() != EditDelta.Kind.BLOCK) {

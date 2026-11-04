@@ -363,6 +363,12 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         if (writer != null && com.fastasyncworldedit.fabric.edit.NativeSessionWriter.batchable(sideEffects)) {
             // Published with its chunk's unit; FAWE counts calls as changes either way.
             BaseBlock target = block.toBaseBlock();
+            // An unsupported target is known now; an unsupported block it replaces, only at snapshot.
+            if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(target.getBlockType().id())) {
+                skipped.add(new com.fastasyncworldedit.fabric.edit.UnsupportedBlockException(
+                        target.toImmutableState().getAsString(), position.x(), position.y(), position.z()));
+                return false;
+            }
             writer.write(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z(), editValue(target), target,
                     sideEffects);
             return true;
@@ -1195,9 +1201,14 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             String id = pending != null ? pending.value().id()
                     : com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () ->
                             FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString());
+            BlockState state = BlockState.get(id);
+            if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(state.getBlockType().id())) {
+                skipped.add(new com.fastasyncworldedit.fabric.edit.UnsupportedBlockException(id, x, y, z));
+                return false;
+            }
             var nbt = NBTConverter.toNative(tile.linTag());
             writer.write(EditDelta.Kind.BLOCK, x, y, z, new EditValue(id, FrozenNbt.capture(nbt)),
-                    BlockState.get(id).toBaseBlock(tile.linTag()), SideEffectSet.none());
+                    state.toBaseBlock(tile.linTag()), SideEffectSet.none());
             return true;
         }
         return nativeWrite(EditDelta.Kind.BLOCK, BlockVector3.at(x, y, z), SideEffectSet.none(), () ->
