@@ -23,18 +23,50 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
-/** Opt-in production commands for bounded cuboid edits with memory history and no neighbor callbacks. */
+/** Opt-in production commands for bounded cuboid edits with disk history and no neighbor callbacks. */
 public final class FabricRegionCommands {
     private static final Map<UUID, String> permissions = new ConcurrentHashMap<>();
+    // Owner thread: each player's operations still running, so cancel, disconnect and stop reach them.
+    private static final Map<UUID, List<Running>> running = new java.util.HashMap<>();
     private static long completed;
 
     private FabricRegionCommands() { }
 
+    /** A running operation's shared token and, once asked, why it was cancelled. */
+    private static final class Running {
+        private final EditActorContext.Cancellation cancellation;
+        private volatile String reason;
+
+        private Running(EditActorContext.Cancellation cancellation) {
+            this.cancellation = cancellation;
+        }
+
+        // Units not yet published are refused at preparation or publication; published ones stay recorded.
+        private void cancel(String why) {
+            if (reason == null) reason = why;
+            cancellation.cancel();
+        }
+    }
+
     /** Register a separate explicit mode without changing ordinary WNA commands. */
     public static void initialize() {
+        // Registered before FabricEdits' own stop hook, so stopping operations carry their reason.
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server ->
+                cancelAll(null, "server stopping"));
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+                server.execute(() -> cancelAll(handler.getPlayer().getUUID(), "operator disconnected")));
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> {
             if (!Boolean.getBoolean("fawe.experimental.coordinated")) return;
             dispatcher.register(Commands.literal("fawe-coordinated")
+                    .then(Commands.literal("cancel").executes(command -> {
+                        ServerPlayer player = command.getSource().getPlayerOrException();
+                        int cancelled = cancelAll(player.getUUID(), "cancelled by " + player.getGameProfile().name());
+                        command.getSource().sendSuccess(() -> Component.literal(cancelled == 0
+                                ? "No coordinated edit is running."
+                                : "Cancelling " + cancelled + " coordinated edit(s); changes already written stay"
+                                        + " recorded and undoable."), false);
+                        return cancelled;
+                    }))
                     .then(Commands.literal("set").then(Commands.argument("state", StringArgumentType.word())
                             .executes(command -> submit(command.getSource(), null, StringArgumentType.getString(command, "state")))))
                     .then(Commands.literal("replace").then(Commands.argument("before", StringArgumentType.word())
@@ -53,6 +85,19 @@ public final class FabricRegionCommands {
 
     /** Owner-thread count of fully completed production commands, not submission acknowledgements. */
     public static long completed() { return completed; }
+
+    // Owner thread. A null player cancels everyone's operations.
+    private static int cancelAll(UUID player, String why) {
+        int count = 0;
+        for (var entry : running.entrySet()) {
+            if (player != null && !player.equals(entry.getKey())) continue;
+            for (Running operation : entry.getValue()) {
+                operation.cancel(why);
+                count++;
+            }
+        }
+        return count;
+    }
 
     // The command thread only captures immutable geometry and state identifiers for preparation.
     private static int submit(CommandSourceStack source, String matching, String replacement) {
@@ -99,6 +144,9 @@ public final class FabricRegionCommands {
             var context = new EditActorContext(player.getUUID(), actor.getName(), EditActorContext.Source.PLAYER,
                     operationId, null, null, player.level().dimension().identifier().toString(), SideEffectSet.none(),
                     new EditActorContext.Cancellation());
+            var operation = new Running(context.cancellation());
+            running.computeIfAbsent(player.getUUID(), key -> new ArrayList<>()).add(operation);
+            var tally = new Tally();
             // Sequential sections keep overlapping snapshots fresh; each section can independently reprepare.
             CompletableFuture<List<CommitReceipt>> chain = CompletableFuture.completedFuture(new ArrayList<>());
             for (int cx = min.x() >> 4; cx <= max.x() >> 4; cx++) {
@@ -120,6 +168,7 @@ public final class FabricRegionCommands {
                             }
                         }).thenApply(next -> {
                             receipts.addAll(next);
+                            tally.add(next);
                             if (next.stream().anyMatch(receipt -> receipt.outcome() != CommitReceipt.Outcome.COMPLETE)) {
                                 throw new IllegalStateException("Coordinated command stopped after partial, denied or conflicting work");
                             }
@@ -150,7 +199,7 @@ public final class FabricRegionCommands {
                 var durable = remembered;
                 var historyFailure = unwritten;
                 source.getServer().execute(() -> finish(source, session, actor, world, limit, operationId,
-                        history, durable, historyFailure, failure));
+                        history, durable, historyFailure, failure, operation, tally, player.getUUID()));
             });
             source.sendSuccess(() -> Component.literal("Coordinated edit admitted: " + operationId), false);
             return 1;
@@ -164,19 +213,23 @@ public final class FabricRegionCommands {
     private static void finish(CommandSourceStack source, com.sk89q.worldedit.LocalSession session,
             com.sk89q.worldedit.fabric.FabricPlayer actor, com.sk89q.worldedit.world.World world,
             com.fastasyncworldedit.core.limit.FaweLimit limit, UUID operationId, ArrayListHistory history,
-            com.sk89q.worldedit.history.changeset.ChangeSet durable, Throwable historyFailure, Throwable failure) {
+            com.sk89q.worldedit.history.changeset.ChangeSet durable, Throwable historyFailure, Throwable failure,
+            Running operation, Tally tally, UUID player) {
         permissions.remove(operationId);
+        var mine = running.get(player);
+        if (mine != null && mine.remove(operation) && mine.isEmpty()) running.remove(player);
         session.remember(actor, world, durable, limit);
         if (historyFailure != null) {
             source.sendFailure(Component.literal("Coordinated edit history could not be written to disk; "
                     + history.size() + " changes stay undoable only until restart: " + rootMessage(historyFailure)));
         }
+        String kind = durable == history ? "memory" : "disk";
         if (failure == null) {
             completed++;
-            String kind = durable == history ? "memory" : "disk";
             source.sendSuccess(() -> Component.literal("Coordinated edit complete: " + history.size()
-                    + " changes (" + kind + " history; no neighbor callbacks)."), false);
+                    + " changes" + tally.unchanged() + " (" + kind + " history; no neighbor callbacks)."), false);
         } else {
+            tally.add(failure);
             // A refusal is clean only when no unit recorded or may have made changes.
             CommitReceipt unknown = receiptMatching(failure,
                     receipt -> receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN);
@@ -184,7 +237,14 @@ public final class FabricRegionCommands {
                     ? receiptMatching(failure, FabricRegionCommands::isPreWriteRefusal) : null;
             UnitFailure unpublished = history.size() == 0 && unknown == null && refusal == null
                     && publishedNothing(failure) ? unitFailure(failure) : null;
-            if (refusal != null) {
+            String cancelled = operation.reason;
+            if (unknown == null && cancelled != null) {
+                // Whatever the next unit then reported, the operation ended because it was cancelled.
+                source.sendFailure(Component.literal("Coordinated edit cancelled (" + cancelled + ") "
+                        + (history.size() == 0 ? "before any change was written"
+                                : "after " + history.size() + " recorded changes (" + kind + " history)")
+                        + tally.unchanged() + tally.refused() + "; nothing after that was written."));
+            } else if (refusal != null) {
                 source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
                         + refusal.chunkX() + "," + refusal.chunkZ()
                         + "; no changes were written: " + refusalReason(refusal)));
@@ -202,8 +262,44 @@ public final class FabricRegionCommands {
                 UnitFailure unit = unitFailure(failure);
                 source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
                         + " recorded changes" + (unit == null ? "" : " in chunk " + unit.chunk.x() + ","
-                        + unit.chunk.z()) + ": " + rootMessage(failure)));
+                        + unit.chunk.z()) + tally.refused() + ": " + rootMessage(failure)));
             }
+        }
+    }
+
+    /** Counts across every receipt of one operation, including those a failure carries. */
+    private static final class Tally {
+        private final java.util.Set<CommitReceipt> seen =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        private long noOp;
+        private long denied;
+        private long conflicts;
+
+        synchronized void add(List<CommitReceipt> receipts) {
+            for (CommitReceipt receipt : receipts) {
+                if (!seen.add(receipt)) continue;
+                noOp += receipt.noOp();
+                denied += receipt.denied();
+                if (receipt.outcome() == CommitReceipt.Outcome.CONFLICT) conflicts++;
+            }
+        }
+
+        synchronized void add(Throwable failure) {
+            for (Throwable current = failure; current != null; current = current.getCause()) {
+                if (current instanceof FabricCommitCoordinator.CommitFailure commit) add(List.of(commit.receipt()));
+                if (current instanceof FabricEdits.OperationFailure operation) add(operation.publishedReceipts());
+            }
+        }
+
+        synchronized String unchanged() {
+            return noOp == 0 ? "" : ", " + noOp + " unchanged";
+        }
+
+        synchronized String refused() {
+            String counts = (denied == 0 ? "" : denied + " denied")
+                    + (denied != 0 && conflicts != 0 ? ", " : "")
+                    + (conflicts == 0 ? "" : conflicts + " conflicting unit(s)");
+            return counts.isEmpty() ? "" : " [" + counts + "]";
         }
     }
 
