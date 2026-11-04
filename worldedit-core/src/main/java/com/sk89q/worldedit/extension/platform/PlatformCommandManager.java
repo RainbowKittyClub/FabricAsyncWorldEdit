@@ -793,7 +793,13 @@ public final class PlatformCommandManager {
 
             // Require null CommandEvent#getSession as it means the editsession is being handled somewhere else.
             if (editSession != null && event.getSession() == null) {
-                editSession.close();
+                //FAWE start - a native edit's last units publish here; their failure is the command's
+                try {
+                    editSession.close();
+                } catch (Throwable failure) {
+                    platformManager.handleThrowable(failure, actor);
+                }
+                //FAWE end
                 session.remember(editSession);
 
                 long time = System.currentTimeMillis() - start;

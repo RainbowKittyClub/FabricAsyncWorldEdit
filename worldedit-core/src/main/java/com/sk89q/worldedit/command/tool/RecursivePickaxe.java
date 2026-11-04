@@ -99,8 +99,13 @@ public class RecursivePickaxe implements BlockTool {
             //Operations.completeBlindly(visitor);
             recurse(server, editSession, world, pos, origin, radius, initialType, visitor.getVisited());
             //FAWE end
-            editSession.flushQueue();
-            session.remember(editSession);
+            //FAWE start - remembered even when the flush fails part-way
+            try {
+                editSession.flushQueue();
+            } finally {
+                session.remember(editSession);
+            }
+            //FAWE end
         }
 
         return true;

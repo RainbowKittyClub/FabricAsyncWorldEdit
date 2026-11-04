@@ -1345,8 +1345,14 @@ public class EditSession extends PassthroughExtent implements AutoCloseable {
                 actor.print(Caption.of("fawe.cancel.reason.outside.level"));
             }
         }
+        // A native world commits here; a failure still closes the history, then is thrown.
+        RuntimeException flushFailure = null;
         if (wnaMode) {
-            getWorld().flush();
+            try {
+                getWorld().flush();
+            } catch (RuntimeException failure) {
+                flushFailure = failure;
+            }
         }
         // Reset limit
         limit.set(originalLimit);
@@ -1387,6 +1393,9 @@ public class EditSession extends PassthroughExtent implements AutoCloseable {
                     throw new RuntimeException(e);
                 }
             }
+        }
+        if (flushFailure != null) {
+            throw flushFailure;
         }
     }
 

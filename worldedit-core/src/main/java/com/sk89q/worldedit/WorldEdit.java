@@ -895,7 +895,14 @@ public final class WorldEdit {
             logger.warn("Failed to execute script", e);
         } finally {
             for (EditSession editSession : scriptContext.getEditSessions()) {
-                editSession.close();
+                //FAWE start - remembered even when the flush fails part-way
+                try {
+                    editSession.close();
+                } catch (RuntimeException failure) {
+                    player.print(Caption.of("worldedit.script.failed", TextComponent.of(String.valueOf(failure.getMessage()))));
+                    logger.warn("Failed to flush a script's edit", failure);
+                }
+                //FAWE end
                 session.remember(editSession);
             }
         }
