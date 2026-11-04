@@ -39,6 +39,7 @@ public final class FabricWorldAccess {
             "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace",
             "minecraft:bell", "minecraft:lectern", "minecraft:gold_block", "minecraft:diamond_block");
     private final MinecraftServer server;
+    private final FabricOptimizations optimizations = FabricOptimizations.detect();
     private FabricStateMapping mapping;
     private boolean mappingValid = true;
     private final Set<CompletableFuture<Void>> maintenance = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -303,7 +304,7 @@ public final class FabricWorldAccess {
             if (section.maybeHas(state -> !minecraftNamespace(state))) {
                 throw new IllegalStateException("Direct-section route lost section eligibility");
             }
-            FabricSectionPublication.install(level, chunk, deltas, mapping);
+            FabricSectionPublication.install(level, chunk, deltas, mapping, optimizations, effects);
             installedSections++;
         } else if (groupRoute && first.kind() == EditDelta.Kind.BLOCK
                 && !mapping.nativeState(first.before().id()).hasBlockEntity()
@@ -316,7 +317,7 @@ public final class FabricWorldAccess {
                     fallbackWrites++;
                 }
             } else {
-                FabricSectionPublication.install(level, chunk, deltas, mapping);
+                FabricSectionPublication.install(level, chunk, deltas, mapping, optimizations, effects);
                 installedSections++;
             }
         } else {
@@ -327,7 +328,12 @@ public final class FabricWorldAccess {
         }
     }
 
-    /** Await vanilla light work, then construct updates on the owner thread for each watcher. */
+    /** The installed optimization mods' verdict, and their pinned adapters. */
+    public FabricOptimizations optimizations() {
+        return optimizations;
+    }
+
+    /** Await the light engine's barrier, then construct updates on the owner thread for each watcher. */
     public synchronized CompletionStage<Void> completePublication(ServerLevel level, CommitReceipt receipt, boolean send) {
         if (stopping) return CompletableFuture.failedFuture(new IllegalStateException("Publication maintenance stopped"));
         CompletableFuture<Void> result = new CompletableFuture<>();
@@ -344,7 +350,7 @@ public final class FabricWorldAccess {
             }
             CompletableFuture<?> light;
             try {
-                light = level.getChunkSource().getLightEngine().waitForPendingTasks(receipt.chunkX(), receipt.chunkZ());
+                light = optimizations.relightBarrier(level, receipt.chunkX(), receipt.chunkZ());
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
                 return;

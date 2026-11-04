@@ -77,10 +77,7 @@ public final class EditIntegrations {
                 throw new IllegalStateException("Installed integration has no provider: " + mod);
             }
         }
-        for (String optimization : List.of("lithium", "c2me", "scalablelux")) {
-            if (FabricLoader.getInstance().isModLoaded(optimization)) {
-                throw new UnsupportedOperationException("Optimization lifecycle is not validated: " + optimization);
-            }
-        }
+        // Lithium, C2ME and ScalableLux are judged by version in FabricOptimizations, which refuses
+        // coordinated admission beside an unverified one instead of failing server start.
     }
 }

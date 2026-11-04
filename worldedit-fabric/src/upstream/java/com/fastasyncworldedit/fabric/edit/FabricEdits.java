@@ -53,6 +53,9 @@ public final class FabricEdits {
         this.server = server;
         mapping = new FabricStateMapping(server);
         access = new FabricWorldAccess(server, mapping);
+        if (access.optimizations().refusal() != null) {
+            com.sk89q.worldedit.internal.util.LogManagerCompat.getLogger().warn(access.optimizations().refusal());
+        }
         preparation = new FabricPreparationService(server, access);
         integrations = EditIntegrations.discover();
         integrations.forEach(integration -> integration.start(server, access));
@@ -269,6 +272,10 @@ public final class FabricEdits {
             if (unit.semantics() != Semantics.INDEPENDENT) {
                 throw new UnsupportedOperationException("No compound publication contract for " + unit.semantics());
             }
+        }
+        String unverified = access.optimizations().refusal();
+        if (unverified != null) {
+            throw new IllegalStateException(unverified);
         }
         if (stopped || admitted.size() >= 8 || requests.isEmpty() || requests.size() > 64) {
             throw new IllegalArgumentException("Operation admission is closed, full or exceeds 64 units");
