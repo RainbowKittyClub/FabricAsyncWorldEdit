@@ -87,6 +87,7 @@ public final class HistoryProbe implements ModInitializer {
                     var context = receipt.context();
                     Map<String, Object> entry = new HashMap<>();
                     entry.put("source", context.source().name());
+                    entry.put("dimension", context.dimension());
                     entry.put("session", String.valueOf(context.sessionId()));
                     entry.put("parent", String.valueOf(context.parentId()));
                     entry.put("originalActor", String.valueOf(context.originalActorId()));

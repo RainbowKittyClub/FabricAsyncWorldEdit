@@ -68,6 +68,15 @@ public abstract class NativeDriverMixin {
                 result.addProperty("sent", true);
                 faweTest$event(result);
             }
+            // A right-click with the main-hand item, as the player aims (the server sets the aim by tp).
+            case "use" -> {
+                if (!state.equals("world")) {
+                    throw new IllegalStateException("Use requested without a ready world");
+                }
+                result.addProperty("result", client.gameMode.useItem(client.player,
+                        net.minecraft.world.InteractionHand.MAIN_HAND).toString());
+                faweTest$event(result);
+            }
             case "command-tree" -> {
                 result.addProperty("visible", client.getConnection().getCommands().getRoot()
                     .getChild(request.get("command").getAsString()) != null);

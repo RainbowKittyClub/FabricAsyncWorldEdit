@@ -81,10 +81,39 @@ public final class S11Probe implements ModInitializer {
             case "coverage" -> {
                 return GSON.toJson(EditCoverage.snapshot());
             }
-            // dump x1 y1 z1 x2 y2 z2: overworld states, y then z then x ascending, as [state, run] pairs.
+            // selection <player>: the session selector's world and region bounds, as WorldEdit sees them.
+            case "selection" -> {
+                ServerPlayer player = server.getPlayerList().getPlayerByName(words[1]);
+                if (player == null) throw new IllegalArgumentException("No such player " + words[1]);
+                var actor = FabricAdapter.adaptPlayer(player);
+                var session = WorldEdit.getInstance().getSessionManager().get(actor);
+                // The selector's own world: asking with the player's world would reset a mismatched selector.
+                var world = session.getSelectionWorld();
+                Map<String, Object> answer = new java.util.LinkedHashMap<>();
+                answer.put("playerWorld", actor.getWorld().id());
+                answer.put("selectorWorld", world == null ? null : world.id() + " " + world.getClass().getSimpleName());
+                answer.put("worldMinY", world == null ? null : world.getMinY());
+                answer.put("worldMaxY", world == null ? null : world.getMaxY());
+                try {
+                    var region = session.getSelection();
+                    answer.put("min", region.getMinimumPoint().toString());
+                    answer.put("max", region.getMaximumPoint().toString());
+                    answer.put("volume", region.getVolume());
+                } catch (com.sk89q.worldedit.IncompleteRegionException incomplete) {
+                    answer.put("region", "incomplete");
+                }
+                return GSON.toJson(answer);
+            }
+            case "statistics" -> {
+                return GSON.toJson(FabricEdits.nativeService(server).publicationStatistics());
+            }
+            // dump x1 y1 z1 x2 y2 z2 [dimension]: states, y then z then x ascending, as [state, run] pairs.
             case "dump" -> {
                 int[] box = box(words, 1);
-                var level = server.overworld();
+                var level = words.length > 7 ? server.getLevel(net.minecraft.resources.ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, net.minecraft.resources.Identifier.parse(words[7])))
+                        : server.overworld();
+                if (level == null) throw new IllegalArgumentException("No such dimension " + words[7]);
                 List<Object[]> runs = new ArrayList<>();
                 for (int y = box[1]; y <= box[4]; y++) {
                     for (int z = box[2]; z <= box[5]; z++) {
