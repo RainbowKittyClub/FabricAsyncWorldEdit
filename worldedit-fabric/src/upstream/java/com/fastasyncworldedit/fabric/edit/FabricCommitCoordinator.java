@@ -371,7 +371,7 @@ public final class FabricCommitCoordinator {
                 ServerPlayer player = server.getPlayerList().getPlayer(proposal.context().actorId());
                 if (player == null || player.hasDisconnected()
                         || !FabricRegionCommands.authorized(proposal.context(), player)) {
-                    throw new IllegalStateException("Current operator is disconnected or command authority is unavailable");
+                    throw new OperatorRefusedException();
                 }
                 if (!access.matches(proposal, level)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;

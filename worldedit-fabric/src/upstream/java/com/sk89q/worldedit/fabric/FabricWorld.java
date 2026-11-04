@@ -163,6 +163,8 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     private final FabricWorldNativeAccess worldNativeAccess;
     private final EditActorContext editContext;
     private final com.sk89q.worldedit.extension.platform.Actor actor;
+    // Set only for a player's own command or tool use (Source.PLAYER).
+    private final java.util.function.BooleanSupplier authority;
     // Cells refused for lack of lifecycle support; the session leaves them unchanged and reports on flush.
     private final List<com.fastasyncworldedit.fabric.edit.UnsupportedBlockException> skipped =
             Collections.synchronizedList(new ArrayList<>());
@@ -175,13 +177,15 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
      * @param world the world
      */
     FabricWorld(Level world) {
-        this(world, null, null);
+        this(world, null, null, null);
     }
 
-    private FabricWorld(Level world, EditActorContext context, com.sk89q.worldedit.extension.platform.Actor actor) {
+    private FabricWorld(Level world, EditActorContext context, com.sk89q.worldedit.extension.platform.Actor actor,
+            java.util.function.BooleanSupplier authority) {
         checkNotNull(world);
         this.editContext = context;
         this.actor = actor;
+        this.authority = authority;
         this.worldRef = new WeakReference<>(world);
         LevelData levelData = world.getLevelData();
         this.worldNameRef = levelData instanceof ServerLevelData serverLevelData
@@ -207,11 +211,25 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public FabricWorld bindActor(com.sk89q.worldedit.extension.platform.Actor actor) {
+        java.util.function.BooleanSupplier authority = playerAuthority(actor);
         EditActorContext context = actor == null ? null : new EditActorContext(actor.getUniqueId(),
-                actor.getName(), EditActorContext.Source.API, java.util.UUID.randomUUID(), null, null,
+                actor.getName(), authority == null ? EditActorContext.Source.API : EditActorContext.Source.PLAYER,
+                java.util.UUID.randomUUID(), null, null,
                 getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
                 new EditActorContext.Cancellation());
-        return new FabricWorld(getWorld(), context, actor);
+        return new FabricWorld(getWorld(), context, actor, authority);
+    }
+
+    // A player's own command or tool use on this thread: its condition is asked again per cell.
+    // Anything else, including a command editing for another actor, is an API edit.
+    private static java.util.function.BooleanSupplier playerAuthority(com.sk89q.worldedit.extension.platform.Actor actor) {
+        var request = com.sk89q.worldedit.session.request.Request.current();
+        if (!(actor instanceof com.sk89q.worldedit.entity.Player) || request == null || request.getAuthority() == null
+                || request.getSession() == null) {
+            return null;
+        }
+        var own = com.sk89q.worldedit.WorldEdit.getInstance().getSessionManager().getIfPresent(actor);
+        return own == request.getSession() ? request.getAuthority() : null;
     }
 
     @Override
@@ -223,7 +241,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                 java.util.UUID.randomUUID(), origin.operationId(), origin.actorId(),
                 getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
                 new EditActorContext.Cancellation());
-        return new FabricWorld(getWorld(), context, actor);
+        return new FabricWorld(getWorld(), context, actor, null);
     }
 
     @Override
@@ -768,9 +786,13 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                 editContext.source(), java.util.UUID.randomUUID(),
                 replay ? editContext.parentId() : editContext.operationId(), editContext.originalActorId(),
                 editContext.dimension(), effects, editContext.cancellation().child(), editContext.operationId());
-        var completion = TaskManager.taskManager().sync(() -> FabricEdits.nativeService(level.getServer())
-                .submitNative(unit, kind, pos, target.get(), nativeHistory));
+        // A player's command or tool is asked again at this cell's publication, like fawe-coordinated.
+        if (authority != null) {
+            com.fastasyncworldedit.fabric.edit.FabricRegionCommands.authorizeWith(unit.operationId(), authority);
+        }
         try {
+            var completion = TaskManager.taskManager().sync(() -> FabricEdits.nativeService(level.getServer())
+                    .submitNative(unit, kind, pos, target.get(), nativeHistory));
             CommitReceipt receipt = completion.toCompletableFuture().join();
             lastNativeReceipt = receipt;
             if (receipt.outcome() == CommitReceipt.Outcome.CONFLICT) {
@@ -788,8 +810,27 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             }
             // Each cell has its own cancellation, so any other failure must stop the operation here.
             editContext.cancellation().cancel();
+            if (operatorRefused(failure)) {
+                // An expected stop, reported like any other FAWE cancellation rather than as a crash.
+                throw new com.fastasyncworldedit.core.internal.exception.FaweException("Stopped: the player"
+                        + " disconnected or no longer has permission for this edit; changes made before this"
+                        + " point are kept and can be undone");
+            }
             throw failure;
+        } finally {
+            if (authority != null) {
+                com.fastasyncworldedit.fabric.edit.FabricRegionCommands.forgetAuthority(unit.operationId());
+            }
         }
+    }
+
+    private static boolean operatorRefused(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof com.fastasyncworldedit.fabric.edit.OperatorRefusedException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Only a clean pre-write refusal for lack of lifecycle support is skippable.

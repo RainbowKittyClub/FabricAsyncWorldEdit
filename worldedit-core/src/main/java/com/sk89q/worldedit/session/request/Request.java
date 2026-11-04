@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 
 /**
  * Describes the current request using a {@link ConcurrentHashMap}.
@@ -51,6 +52,8 @@ public final class Request {
     private Actor actor;
     @Nullable
     private Extent extent;
+    @Nullable
+    private BooleanSupplier authority;
     //FAWE end
 
     private Request() {
@@ -107,6 +110,28 @@ public final class Request {
 
     public void setActor(@Nullable Actor actor) {
         this.actor = actor;
+    }
+
+    /**
+     * The condition that let the current player command or tool use run, asked again before each
+     * cell it writes; null outside one.
+     */
+    @Nullable
+    public BooleanSupplier getAuthority() {
+        return authority;
+    }
+
+    public void setAuthority(@Nullable BooleanSupplier authority) {
+        this.authority = authority;
+    }
+
+    /**
+     * The current thread's request without creating one, for callers that only ask whether a
+     * player command or tool use is running here.
+     */
+    @Nullable
+    public static Request current() {
+        return requests.get(Thread.currentThread());
     }
     //FAWE end
 

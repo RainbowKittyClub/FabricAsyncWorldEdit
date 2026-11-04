@@ -708,6 +708,11 @@ public final class PlatformCommandManager {
         }
 
         MemoizingValueAccess context = initializeInjectedValues(event::getArguments, actor, event, false);
+        //FAWE start - edits this command makes ask its condition again before each write; for a
+        // command with subcommands that is the parent's condition (any subcommand permission)
+        commandManager.getCommand(split[0]).ifPresent(command ->
+                Request.request().setAuthority(() -> command.getCondition().satisfied(context)));
+        //FAWE end
 
         ThrowableSupplier<Throwable> task = () -> commandManager.execute(context, ImmutableList.copyOf(split));
 
