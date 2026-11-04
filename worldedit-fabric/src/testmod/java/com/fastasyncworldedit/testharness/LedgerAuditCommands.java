@@ -116,6 +116,26 @@ public final class LedgerAuditCommands {
                 LedgerClaimFixture.claimForStranger(level.getServer());
                 return GSON.toJson(Map.of("claimed", "200,200"));
             }
+            // ordinary <place|insert> x y z object player: a row as Ledger's own gameplay listeners
+            // log it, through the public logAction queue.
+            case "ordinary" -> {
+                var player = level.getServer().getPlayerList().getPlayerByName(words[6]);
+                if (player == null) throw new IllegalArgumentException("No such player " + words[6]);
+                com.github.quiltservertools.ledger.actions.AbstractActionType action = switch (words[1]) {
+                    case "place" -> new com.github.quiltservertools.ledger.actions.BlockPlaceActionType();
+                    case "insert" -> new com.github.quiltservertools.ledger.actions.ItemInsertActionType();
+                    default -> throw new IllegalArgumentException("Unknown ordinary action " + words[1]);
+                };
+                action.setPos(new BlockPos(Integer.parseInt(words[2]), Integer.parseInt(words[3]), Integer.parseInt(words[4])));
+                action.setWorld(level.dimension().identifier());
+                action.setTimestamp(java.time.Instant.now());
+                action.setObjectIdentifier(Identifier.parse(words[5]));
+                action.setOldObjectIdentifier(Identifier.parse(words[1].equals("place") ? "minecraft:air" : words[5]));
+                action.setSourceName("player");
+                action.setSourceProfile(player.nameAndId());
+                api.logAction(action);
+                return GSON.toJson(Map.of("logged", words[1]));
+            }
             case "diskfull" -> {
                 diskFull = words[1].equals("on");
                 return GSON.toJson(Map.of("diskFull", diskFull));

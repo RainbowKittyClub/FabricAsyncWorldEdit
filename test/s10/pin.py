@@ -33,5 +33,6 @@ if len(sys.argv) > 1:
     deps['ledger-rkc'] = pin(ledger)
 manifest['profiles']['history-base'] = ['candidate', 'fabric-api', 'lifecycle-probe']
 manifest['profiles']['history-audit'] = manifest['profiles']['audit']
+manifest['profiles']['replay'] = manifest['profiles']['audit']
 (root / 'test/s10/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe', 'ledger-rkc')}))
