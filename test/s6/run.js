@@ -130,7 +130,8 @@ async function main () {
         if (report.wnaBypassReproduced) await expected(3200, 80, 3200, 'minecraft:diamond_block')
         else {
           const facts = []
-          const observe = async (name, applied, denied, historyBefore, source = 'API', original) => {
+          // A player's own //set edits as that player.
+          const observe = async (name, applied, denied, historyBefore, source = 'PLAYER', original) => {
             const state = JSON.parse(await send('s6probe native-status'))
             if (state.nativeReceipts.reduce((sum, receipt) => sum + receipt.applied, 0) !== applied ||
                 state.nativeReceipts.reduce((sum, receipt) => sum + receipt.denied, 0) !== denied ||

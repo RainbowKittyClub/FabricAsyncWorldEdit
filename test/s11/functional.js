@@ -200,8 +200,13 @@ module.exports = ({ rig, check, paced }) => {
       }, 30000, [client.entry])
       revoked = last
       check('revoked-partial', revoked > 0 && revoked < 64, { revoked })
-      const reported = /Stopped: the player disconnected or no longer has permission/
-        .test(fs.readFileSync(client.entry.log, 'utf8').slice(chatOffset))
+      // The refusal can reach the client log just after the count settles; wait up to 10 s.
+      let reported = false
+      for (const end = Date.now() + 10000; !reported && Date.now() < end;) {
+        reported = /Stopped: the player disconnected or no longer has permission/
+          .test(fs.readFileSync(client.entry.log, 'utf8').slice(chatOffset))
+        if (!reported) await new Promise(resolve => setTimeout(resolve, 250))
+      }
       check('revoked-reported', reported, { reported })
       await send(`op ${name}`)
       const entry = JSON.parse(await send(`fawes10 history ${name}`)).entries.at(-1)
