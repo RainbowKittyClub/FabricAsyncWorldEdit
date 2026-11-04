@@ -177,8 +177,19 @@ module.exports = ({ rig, check, paced }) => {
         cost[label] = { units: units.length, applied: units.reduce((sum, entry) => sum + entry.applied, 0),
           meanMs: ms.reduce((sum, value) => sum + value, 0) / (ms.length || 1), maxMs: Math.max(0, ...ms) }
       }
+      // One full 4096-cell unit in the player's chunk 412,400: the largest single-tick step.
+      await send('forceload add 6592 6400 6607 6415')
+      await send('fill 6592 79 6400 6607 79 6415 minecraft:stone')
+      await send('fill 6592 80 6400 6607 95 6415 minecraft:air')
+      await claim('owner', 412, 400)
+      await select(6592, 80, 6400, 6607, 95, 6415)
+      const sinceFull = await now(send)
+      await chatCommand('/set stone', /Operation completed/)
+      const full = (await probe(send, `timeline ${sinceFull}`)).publications.filter(entry => entry.chunkX === 412)
+      cost.ownFullUnit = { units: full.length, applied: full.reduce((sum, entry) => sum + entry.applied, 0),
+        ms: full.map(entry => entry.nanos / 1e6) }
       check('opac-unit-cost', cost.own.units === 16 && cost.own.applied === 16384 && cost.stranger.applied === 0 &&
-        cost.unclaimed.applied === 16384, cost)
+        cost.unclaimed.applied === 16384 && cost.ownFullUnit.units === 1 && cost.ownFullUnit.applied === 4096, cost)
 
       await verifyAll(send, '')
       const coverage = delta(before, await probe(send, 'coverage'))
