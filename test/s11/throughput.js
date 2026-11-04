@@ -17,6 +17,8 @@ const WIDE = [5296, 80, 5056, 5327, 99, 5087]
 const TOGGLED = [5376, 80, 4992, 5383, 81, 4999]
 const TOGGLE = [5390, 90, 5006]
 const READ_BACK = [5385, 80, 5085]
+// 64 cells of one chunk with neighbour updates on: the one-cell route, one unit per cell.
+const ONE_CELL = [5328, 80, 5056, 5335, 80, 5063]
 
 const chunksOf = ([x1, , z1, x2, , z2]) => {
   const out = new Set()
@@ -30,6 +32,7 @@ module.exports = ({ rig, check, paced }) => {
     { name: 'set16-undone', box: SET16, expect: () => undefined },
     { name: 'large', box: LARGE, expect: () => 'minecraft:glass' },
     { name: 'wide', box: WIDE, expect: () => 'minecraft:oak_planks' },
+    { name: 'one-cell', box: ONE_CELL, expect: () => 'minecraft:stone' },
     { name: 'toggled', box: TOGGLED, expect: () => 'minecraft:glowstone' },
     { name: 'read-back', box: [...READ_BACK, ...READ_BACK], expect: () => 'minecraft:diamond_block' }
   ]
@@ -89,9 +92,13 @@ module.exports = ({ rig, check, paced }) => {
       let since = await now(send)
       let timing = await probe(send, 'timing')
       await chatCommand('/set stone', /Operation completed/)
+      // The tick the reply was seen, against the units' own ticks.
+      const replied = await now(send)
       const set = await settled(send, client, since, SET16, 16)
       const afterSet = await probe(send, 'timing')
       const idle = afterSet.idleWithPending - timing.idleWithPending
+      check('set16-reply-lead', true,
+        { replied, ticks: set.ticks, unitsAfterReply: set.own.filter(entry => entry.tick > replied).length })
       check('set16-units', set.units === 16 && set.applied === cellCount(SET16) && set.outcomes.join() === 'COMPLETE',
         { ...set, own: undefined })
       check('set16-consecutive', set.consecutive && idle === 0, { ticks: set.ticks, idle, ...lags(timing, afterSet) })
@@ -126,6 +133,19 @@ module.exports = ({ rig, check, paced }) => {
       check('wide-consecutive', wide.units === 8 && wide.applied === cellCount(WIDE) && wide.consecutive &&
         afterWide.idleWithPending === timing.idleWithPending && wide.outcomes.join() === 'COMPLETE',
       { ...wide, own: undefined, idle: afterWide.idleWithPending - timing.idleWithPending, ...lags(timing, afterWide) })
+
+      // Neighbour updates on: each cell is its own unit, submitted once the previous one finished.
+      await chatCommand('/perf neighbors on', /set to|is already/)
+      await select(...ONE_CELL)
+      since = await now(send)
+      timing = await probe(send, 'timing')
+      await chatCommand('/set stone', /Operation completed/)
+      const oneCell = await settled(send, client, since, ONE_CELL, 64)
+      const afterOneCell = await probe(send, 'timing')
+      await chatCommand('/perf neighbors off', /set to|is already/)
+      const span = oneCell.ticks.length ? oneCell.ticks[1] - oneCell.ticks[0] + 1 : 0
+      check('one-cell-route', oneCell.units === 64 && oneCell.applied === 64 && oneCell.outcomes.join() === 'COMPLETE',
+        { ...oneCell, own: undefined, span, cellsPerSecond: span ? 64 / span * 20 : 0, ...lags(timing, afterOneCell) })
 
       // A block changing every tick elsewhere in the chunk is not a conflict.
       await probe(send, `toggle ${TOGGLE.join(' ')}`)
