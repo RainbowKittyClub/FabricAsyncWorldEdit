@@ -211,11 +211,16 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public FabricWorld bindActor(com.sk89q.worldedit.extension.platform.Actor actor) {
+        return bindActor(actor, SideEffectSet.defaults());
+    }
+
+    @Override
+    public FabricWorld bindActor(com.sk89q.worldedit.extension.platform.Actor actor, SideEffectSet sideEffects) {
         java.util.function.BooleanSupplier authority = playerAuthority(actor);
         EditActorContext context = actor == null ? null : new EditActorContext(actor.getUniqueId(),
                 actor.getName(), authority == null ? EditActorContext.Source.API : EditActorContext.Source.PLAYER,
                 java.util.UUID.randomUUID(), null, null,
-                getWorld().dimension().identifier().toString(), SideEffectSet.defaults(),
+                getWorld().dimension().identifier().toString(), sideEffects,
                 new EditActorContext.Cancellation());
         return new FabricWorld(getWorld(), context, actor, authority);
     }
@@ -285,7 +290,11 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     }
 
     @Override
-    public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet sideEffects) throws WorldEditException {
+    public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet requested) throws WorldEditException {
+        // A WNA-mode session writes through the two-argument setBlock, which passes WorldEdit's
+        // defaults; the session's own side effects (//perf) were bound with its actor.
+        SideEffectSet sideEffects = requested == SideEffectSet.defaults() && editContext != null
+                ? editContext.sideEffects() : requested;
         return nativeWrite(EditDelta.Kind.BLOCK, position,
                 sideEffects.with(SideEffect.VALIDATION, SideEffect.State.OFF), () -> {
                     BaseBlock target = block.toBaseBlock();

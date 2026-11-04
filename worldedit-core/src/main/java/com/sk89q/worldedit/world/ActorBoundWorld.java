@@ -11,6 +11,14 @@ public interface ActorBoundWorld extends World {
     /** Return a new session view; a missing actor must not inherit the previous view's authority. */
     World bindActor(@Nullable Actor actor);
 
+    /**
+     * Bind the actor and the session's side effects; writes arriving with WorldEdit's defaults use
+     * them instead, since a WNA-mode session passes no side effects of its own.
+     */
+    default World bindActor(@Nullable Actor actor, com.sk89q.worldedit.util.SideEffectSet sideEffects) {
+        return bindActor(actor);
+    }
+
     /** Bind replay provenance without replacing the current operator's authority. */
     default World bindReplay(@Nullable Actor actor, com.sk89q.worldedit.history.changeset.ChangeSet history,
             boolean redo) {

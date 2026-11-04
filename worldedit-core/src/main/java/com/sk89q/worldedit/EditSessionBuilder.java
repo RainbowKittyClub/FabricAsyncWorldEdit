@@ -460,12 +460,6 @@ public final class EditSessionBuilder {
         if (actor == null && event.getActor() != null) {
             actor = event.getActor();
         }
-        if (WorldWrapper.unwrap(world) instanceof com.sk89q.worldedit.world.ActorBoundWorld bound) {
-            world = replayHistory == null ? bound.bindActor(actor)
-                    : bound.bindReplay(actor, replayHistory, replayRedo);
-            wnaMode = true;
-            combineStages = false;
-        }
         if (limit == null) {
             if (actor == null) {
                 limit = FaweLimit.MAX;
@@ -488,6 +482,13 @@ public final class EditSessionBuilder {
                     SideEffect.ENTITY_EVENTS,
                     limit.SKIP_ENTITY_SPAWN_EVENTS ? SideEffect.State.OFF : SideEffect.State.ON
             );
+        }
+        // Bound once the session's side effects are known: WNA mode reaches them only through the world.
+        if (WorldWrapper.unwrap(world) instanceof com.sk89q.worldedit.world.ActorBoundWorld bound) {
+            world = replayHistory == null ? bound.bindActor(actor, sideEffectSet)
+                    : bound.bindReplay(actor, replayHistory, replayRedo);
+            wnaMode = true;
+            combineStages = false;
         }
         if (checkMemory == null) {
             checkMemory = actor != null && !this.fastMode;
