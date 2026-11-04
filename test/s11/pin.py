@@ -31,5 +31,11 @@ claims = ['opac', 'forge-config', 's6-probe', 'test-permissions']
 for key in claims:
     deps[key] = s6['availableDependencies'][key]
 manifest['profiles']['claims-opac'] = ['candidate', 'fabric-api', 'lifecycle-probe', *claims]
+# The ledger suite: S8's audit set, pinned by test/s8/pin.py.
+s8 = json.loads((root / 'test/s8/manifest.json').read_text())
+audit = ['ledger-rkc', 'kotlin', 'universal-ledger', 'opac', 'forge-config']
+for key in audit:
+    deps[key] = s8['availableDependencies'][key]
+manifest['profiles']['ledger-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))

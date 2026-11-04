@@ -55,6 +55,14 @@ public final class S11Probe implements ModInitializer {
                 DEOP = null;
                 server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), "deop " + deop);
             }
+            BlockPos change = CHANGE_AT;
+            if (change != null && EditCoverage.snapshot().getOrDefault("native.PLAYER.admitted", 0L) > CHANGE_AFTER) {
+                CHANGE_AT = null;
+                var level = server.overworld();
+                level.setBlock(change, level.getBlockState(change).is(net.minecraft.world.level.block.Blocks.STONE)
+                        ? net.minecraft.world.level.block.Blocks.GLASS.defaultBlockState()
+                        : net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 2);
+            }
             BlockPos toggle = TOGGLE;
             if (toggle != null) {
                 var level = server.overworld();
@@ -134,6 +142,13 @@ public final class S11Probe implements ModInitializer {
                 TOGGLE = words[1].equals("off") ? null
                         : new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
                 return GSON.toJson(Map.of("toggle", String.valueOf(TOGGLE)));
+            }
+            // change-on-admit x y z: flip that cell once, at the start of the tick after the next
+            // native unit is admitted, so between its snapshot and its publication at the tick's end.
+            case "change-on-admit" -> {
+                CHANGE_AFTER = EditCoverage.snapshot().getOrDefault("native.PLAYER.admitted", 0L);
+                CHANGE_AT = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+                return GSON.toJson(Map.of("armed", CHANGE_AT.toShortString(), "after", CHANGE_AFTER));
             }
             // deop-on-publish player: de-op them on the tick after the next publication.
             case "deop-on-publish" -> {
@@ -246,6 +261,8 @@ public final class S11Probe implements ModInitializer {
     private static volatile BlockPos TOGGLE;
     private static volatile String DEOP;
     private static volatile int DEOP_AFTER;
+    private static volatile BlockPos CHANGE_AT;
+    private static volatile long CHANGE_AFTER;
 
     // FAWE's asynchronous coordinated API, submitted on the owner thread.
     private static void bulkEdit(MinecraftServer server, ServerPlayer player, BlockState block, int[] box,

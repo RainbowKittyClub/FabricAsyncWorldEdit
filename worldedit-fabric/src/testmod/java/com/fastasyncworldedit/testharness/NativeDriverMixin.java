@@ -77,6 +77,20 @@ public abstract class NativeDriverMixin {
                         net.minecraft.world.InteractionHand.MAIN_HAND).toString());
                 faweTest$event(result);
             }
+            // A left-click on the aimed block, then released before any break progress.
+            case "attack" -> {
+                if (!state.equals("world")) {
+                    throw new IllegalStateException("Attack requested without a ready world");
+                }
+                if (!(client.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit)
+                        || hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK) {
+                    throw new IllegalStateException("Attack requested without a block in aim");
+                }
+                result.addProperty("result", client.gameMode.startDestroyBlock(hit.getBlockPos(), hit.getDirection()));
+                client.gameMode.stopDestroyBlock();
+                result.addProperty("pos", hit.getBlockPos().toShortString());
+                faweTest$event(result);
+            }
             case "command-tree" -> {
                 result.addProperty("visible", client.getConnection().getCommands().getRoot()
                     .getChild(request.get("command").getAsString()) != null);
