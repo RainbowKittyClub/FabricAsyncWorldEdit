@@ -105,6 +105,7 @@ public final class FabricCommitCoordinator {
         Pending unit = new Pending(operation, proposal, bytes, afterHistory, nativeMutation);
         pending.add(unit);
         retainedBytes += bytes;
+        reached(unit, "admitted");
         operation.units.add(unit.completion);
         try {
             detachedExecutor.execute(() -> prepare(unit));
@@ -333,6 +334,7 @@ public final class FabricCommitCoordinator {
                 unit.preparationFailure = failure;
                 unit.operation.phase = Phase.READY;
                 unit.ready = true;
+                if (failure == null) reached(unit, "prepared");
             }
         });
     }
@@ -417,6 +419,7 @@ public final class FabricCommitCoordinator {
                         }
                     }
                     List<EditDelta> finalWrite = List.copyOf(writeSet);
+                    reached(unit, "authorized");
                     // The route is proposal-wide only while a provider holds section-scoped state: a
                     // live token forbids mixing ordinary writes, so every group must go direct.
                     // Without such a provider, writeUnit selects the route per publication unit.
@@ -497,6 +500,7 @@ public final class FabricCommitCoordinator {
             unit.operation.phase = Phase.PUBLISHED;
             publishedUnits.incrementAndGet();
         }
+        if (!applied.isEmpty()) reached(unit, "published");
         finalizeUnit(unit, level, receipt, failure);
     }
 
@@ -560,6 +564,7 @@ public final class FabricCommitCoordinator {
                 unit.operation.phase = Phase.RECONCILED;
                 reconciledUnits.incrementAndGet();
             }
+            reached(unit, "reconciled");
             CompletionStage<Void> recorded;
             try {
                 recorded = historyFailure.get() == null ? Objects.requireNonNull(unit.afterHistory.apply(receipt))
@@ -641,10 +646,15 @@ public final class FabricCommitCoordinator {
         if (problem == null) {
             unit.operation.phase = Phase.RECORDED;
             recordedUnits.incrementAndGet();
+            reached(unit, "recorded");
             unit.completion.complete(terminal);
         } else {
             unit.completion.completeExceptionally(new CommitFailure(terminal, problem));
         }
+    }
+
+    private static void reached(Pending unit, String stage) {
+        EditCoverage.reached(unit.nativeMutation, unit.proposal.context().source(), stage);
     }
 
     // Quarantine keys cannot alias dimensions or signed chunk coordinates.

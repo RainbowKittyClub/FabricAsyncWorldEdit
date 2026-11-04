@@ -118,6 +118,7 @@ public final class FabricPreparationService {
                             pos.x(), pos.z(), job.mapping, job.submitter.apply(job.snapshots), remaining, job.context);
                     job.snapshots.put(pos, snapshot);
                     snapshotsCaptured++;
+                    EditCoverage.reached(false, job.context.source(), "snapshot");
                     captured = true;
                 }
                 if (job.snapshots.size() == job.positions.size()) {
@@ -166,6 +167,7 @@ public final class FabricPreparationService {
                         new FabricChunkTickets(access.level(key), 16));
                 for (BlockVector2 pos : job.positions) {
                     job.leases.add(manager.acquire(pos.x(), pos.z()));
+                    EditCoverage.reached(false, job.context.source(), "ticket");
                 }
                 job.loads = CompletableFuture.allOf(job.leases.stream()
                         .map(lease -> lease.loaded().toCompletableFuture()).toArray(CompletableFuture[]::new));

@@ -139,6 +139,7 @@ public final class FabricEdits {
             com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, pos.x() >> 4, pos.z() >> 4);
         }
         EditValue before = access.read(level, kind, pos.x(), pos.y(), pos.z(), "");
+        EditCoverage.reached(true, context.source(), "snapshot");
         if (kind == EditDelta.Kind.BLOCK && target.nbt() == null && before.nbt() != null
                 && mapping.nativeState(before.id()).getBlock() == mapping.nativeState(target.id()).getBlock()) {
             target = new EditValue(target.id(), before.nbt());
