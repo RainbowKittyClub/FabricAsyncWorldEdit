@@ -284,7 +284,8 @@ public final class FabricEdits {
                         .map(delta -> new PreparedChunkEdit.ReadDependency(delta.kind(), delta.x(), delta.y(),
                                 delta.z(), "", delta.before(), revision)).toList();
                 var proposal = new PreparedChunkEdit(context, chunkX, chunkZ, mapping.generation(), reads, part);
-                CompletionStage<CommitReceipt> completion = coordinator.submitNative(proposal);
+                // A session's targets are absolute; a plain cell changed meanwhile is overwritten as found.
+                CompletionStage<CommitReceipt> completion = coordinator.submitNative(proposal, true);
                 outstanding++;
                 completion.whenComplete((receipt, problem) -> {
                     if (server.isSameThread()) settle(part, attempt, receipt, problem);

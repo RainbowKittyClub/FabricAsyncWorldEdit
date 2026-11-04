@@ -128,24 +128,52 @@ public final class FabricWorldAccess {
      * native units whose targets are absolute, so changes elsewhere in the chunk do not conflict.
      */
     public boolean matches(PreparedChunkEdit proposal, ServerLevel level, boolean revisions) {
+        return matches(proposal, level, revisions, false);
+    }
+
+    /**
+     * As {@link #matches(PreparedChunkEdit, ServerLevel, boolean)}; with {@code rebase}, a changed
+     * value still matches when it is {@link #rebasable}, since an absolute target overwrites it as found.
+     */
+    public boolean matches(PreparedChunkEdit proposal, ServerLevel level, boolean revisions, boolean rebase) {
         owner();
         if (!mappingValid || proposal.registryGeneration() != mapping.generation()) {
             return false;
         }
         for (PreparedChunkEdit.ReadDependency dependency : proposal.reads()) {
             LevelChunk chunk = loadedChunk(level, dependency.x() >> 4, dependency.z() >> 4);
-            if (revisions && ((ChunkRevision) chunk).worldedit$editRevision() != dependency.revision()
-                    || !Objects.equals(dependency.value(), read(level, dependency.kind(), dependency.x(),
-                            dependency.y(), dependency.z(), dependency.key()))) {
+            if (revisions && ((ChunkRevision) chunk).worldedit$editRevision() != dependency.revision()) {
+                return false;
+            }
+            EditValue current = read(level, dependency.kind(), dependency.x(), dependency.y(), dependency.z(),
+                    dependency.key());
+            if (!Objects.equals(dependency.value(), current)
+                    && !(rebase && rebasable(dependency.kind(), dependency.value(), current))) {
                 return false;
             }
         }
         for (EditDelta delta : proposal.writes()) {
-            if (!Objects.equals(delta.before(), read(level, delta))) {
+            EditValue current = read(level, delta);
+            if (!Objects.equals(delta.before(), current) && !(rebase && rebasable(delta.kind(), delta.before(), current))) {
                 return false;
             }
         }
         return true;
+    }
+
+    // Neither value carries NBT and the current block is supported without a block entity: nothing
+    // that was authorized, counted or inherited at the snapshot depends on the difference.
+    private boolean rebasable(EditDelta.Kind kind, EditValue snapshot, EditValue current) {
+        if (kind == EditDelta.Kind.BIOME) {
+            return true;
+        }
+        if (kind != EditDelta.Kind.BLOCK || snapshot == null || current == null
+                || snapshot.nbt() != null || current.nbt() != null) {
+            return false;
+        }
+        var state = mapping.nativeState(current.id());
+        return !state.hasBlockEntity()
+                && SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     /** Validate the entire bounded unit before any mutation, not after a partial unsupported write. */
@@ -162,16 +190,47 @@ public final class FabricWorldAccess {
     /** Validate a native unit without substituting section-publication side effects. */
     public void validateNative(PreparedChunkEdit proposal, ServerLevel level) {
         owner();
-        var effects = proposal.context().sideEffects();
-        if (proposal.writes().isEmpty() || effects.shouldApply(SideEffect.VALIDATION)) {
-            throw new UnsupportedOperationException("Native targets must be validated before authorization");
-        }
-        // A callback may change another cell of the same unit after its before-value was read.
-        if (proposal.writes().size() > 1
-                && (effects.shouldApply(SideEffect.NEIGHBORS) || effects.shouldApply(SideEffect.UPDATE))) {
-            throw new UnsupportedOperationException("Cross-cell callbacks require one cell per native unit");
+        if (proposal.writes().isEmpty()) {
+            throw new UnsupportedOperationException("A native unit writes at least one cell");
         }
         validatePayloads(proposal, level);
+    }
+
+    /** Whether these side effects run callbacks that may change other cells. */
+    public static boolean hasCallbacks(SideEffectSet effects) {
+        return effects.shouldApply(SideEffect.NEIGHBORS) || effects.shouldApply(SideEffect.UPDATE);
+    }
+
+    /** These side effects with the callbacks left for {@link #runCallbacks}. */
+    public static SideEffectSet withoutCallbacks(SideEffectSet effects) {
+        return effects.with(SideEffect.NEIGHBORS, SideEffect.State.OFF).with(SideEffect.UPDATE, SideEffect.State.OFF);
+    }
+
+    /**
+     * Run a unit's placement and neighbour callbacks once all its cells are written, in write order.
+     * As in vanilla, {@code onPlace} runs only while the cell still holds the block written there.
+     */
+    public void runCallbacks(ServerLevel level, List<CommitReceipt.AppliedDelta> applied, SideEffectSet effects) {
+        owner();
+        var nativeAccess = new com.sk89q.worldedit.fabric.internal.FabricWorldNativeAccess(
+                new java.lang.ref.WeakReference<>(level));
+        for (CommitReceipt.AppliedDelta entry : applied) {
+            EditDelta delta = entry.delta();
+            if (delta.kind() != EditDelta.Kind.BLOCK) {
+                continue;
+            }
+            BlockPos pos = new BlockPos(delta.x(), delta.y(), delta.z());
+            var old = mapping.nativeState(delta.before().id());
+            var now = level.getBlockState(pos);
+            if (effects.shouldApply(SideEffect.UPDATE) && now.is(mapping.nativeState(delta.after().id()).getBlock())) {
+                now.onPlace(level, pos, old, false);
+                now = level.getBlockState(pos);
+            }
+            if (effects.shouldApply(SideEffect.NEIGHBORS)) {
+                nativeAccess.notifyNeighbors(pos, old, now);
+                nativeAccess.updateNeighbors(pos, old, now, 512);
+            }
+        }
     }
 
     /** Whether a block type, by registry id, has verified lifecycle support. */
@@ -449,6 +508,18 @@ public final class FabricWorldAccess {
         var block = delta.after().nbt() == null ? state.toBaseBlock() : state.toBaseBlock(
                 com.sk89q.worldedit.fabric.internal.NBTConverter.fromNative(delta.after().nbt().thaw()));
         BlockPos pos = new BlockPos(delta.x(), delta.y(), delta.z());
+        if (effects.shouldApply(SideEffect.VALIDATION)) {
+            // Corrected against the cells written so far; a correction to an unsupported block is left out.
+            var target = mapping.nativeState(delta.after().id());
+            var valid = Block.updateFromNeighbourShapes(target, level, pos);
+            if (valid != target
+                    && SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(valid.getBlock()).toString())) {
+                var corrected = FabricAdapter.adapt(valid);
+                block = valid.getBlock() == target.getBlock() && block.getNbtReference() != null
+                        ? corrected.toBaseBlock(block.getNbtReference()) : corrected.toBaseBlock();
+            }
+            effects = effects.with(SideEffect.VALIDATION, SideEffect.State.OFF);
+        }
         try {
             // Same-type state changes retain NBT; history replays tile data before block properties.
             var tile = level.getBlockEntity(pos);

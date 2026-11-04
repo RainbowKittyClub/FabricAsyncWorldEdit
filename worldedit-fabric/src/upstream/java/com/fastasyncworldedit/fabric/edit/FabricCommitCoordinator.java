@@ -18,6 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 import com.fastasyncworldedit.fabric.compat.EditIntegration;
 import com.fastasyncworldedit.fabric.compat.EditIntegrations;
+import com.sk89q.worldedit.util.SideEffectSet;
 
 /** Bounded, owner-thread publication with explicit receipts and nonblocking finalization. */
 public final class FabricCommitCoordinator {
@@ -78,21 +79,30 @@ public final class FabricCommitCoordinator {
     /** Register a queue completion consumer before publication becomes eligible. */
     public synchronized CompletionStage<CommitReceipt> submitCommit(PreparedChunkEdit proposal,
             Function<CommitReceipt, CompletionStage<Void>> afterHistory) {
-        return submit(proposal, afterHistory, false);
+        return submit(proposal, afterHistory, false, false);
     }
 
     /** Use the same admission, authorization, receipts and finalization for one chunk's WNA cells. */
     public synchronized CompletionStage<CommitReceipt> submitNative(PreparedChunkEdit proposal) {
+        return submitNative(proposal, false);
+    }
+
+    /**
+     * As {@link #submitNative(PreparedChunkEdit)}. With {@code rebase}, a cell whose plain value
+     * changed since the snapshot takes the current value as its before-value instead of conflicting;
+     * for absolute targets only, as a WorldEdit session's are.
+     */
+    public synchronized CompletionStage<CommitReceipt> submitNative(PreparedChunkEdit proposal, boolean rebase) {
         if (proposal.writes().isEmpty()) {
             throw new IllegalArgumentException("Native publication requires at least one cell");
         }
-        return submit(proposal, receipt -> CompletableFuture.completedFuture(null), true);
+        return submit(proposal, receipt -> CompletableFuture.completedFuture(null), true, rebase);
     }
 
     // Both backends reserve their lane and completion before detached preparation can run.
     private CompletionStage<CommitReceipt> submit(PreparedChunkEdit proposal,
             Function<CommitReceipt, CompletionStage<Void>> afterHistory,
-            boolean nativeMutation) {
+            boolean nativeMutation, boolean rebase) {
         Objects.requireNonNull(afterHistory);
         Operation operation = operations.get(proposal.context().operationId());
         if (stopped || operation == null || operation.sealed || !operation.context.equals(proposal.context())) {
@@ -102,7 +112,7 @@ public final class FabricCommitCoordinator {
         if (pending.size() >= maxPending || bytes > maxBytes - retainedBytes) {
             throw new RejectedExecutionException("Bounded commit admission is full");
         }
-        Pending unit = new Pending(operation, proposal, bytes, afterHistory, nativeMutation);
+        Pending unit = new Pending(operation, proposal, bytes, afterHistory, nativeMutation, rebase);
         pending.add(unit);
         retainedBytes += bytes;
         reached(unit, "admitted");
@@ -441,7 +451,7 @@ public final class FabricCommitCoordinator {
                         || !FabricRegionCommands.authorized(proposal.context(), player)) {
                     throw new OperatorRefusedException();
                 }
-                if (!access.matches(proposal, level, !unit.nativeMutation)) {
+                if (!access.matches(proposal, level, !unit.nativeMutation, unit.rebase)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
                 } else {
                     if (!unit.nativeMutation) {
@@ -502,9 +512,13 @@ public final class FabricCommitCoordinator {
                     for (EditIntegration.Reservation reservation : unit.reservations) {
                         reservation.beforePublication(level, finalWrite, directSections);
                     }
-                    if (!access.matches(proposal, level, !unit.nativeMutation)) {
+                    if (!access.matches(proposal, level, !unit.nativeMutation, unit.rebase)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
                     }
+                    // Callbacks run once every cell is written, so none sees a half-written unit.
+                    SideEffectSet effects = proposal.context().sideEffects();
+                    boolean deferred = unit.nativeMutation && FabricWorldAccess.hasCallbacks(effects);
+                    SideEffectSet writeEffects = deferred ? FabricWorldAccess.withoutCallbacks(effects) : effects;
                     for (List<EditDelta> group : access.publicationUnits(writeSet)) {
                         for (EditDelta delta : group) {
                             if (!Objects.equals(access.read(level, delta), delta.before())) {
@@ -517,7 +531,7 @@ public final class FabricCommitCoordinator {
                                         directSections, groupRoute);
                             } else {
                                 for (EditDelta delta : group) {
-                                    access.writeNative(level, delta, proposal.context().sideEffects());
+                                    access.writeNative(level, delta, writeEffects);
                                 }
                             }
                         } finally {
@@ -545,6 +559,10 @@ public final class FabricCommitCoordinator {
                             throw new IllegalStateException("Actual values could not be read back after a write;"
                                     + " applied changes are a lower bound", readBackFailure);
                         }
+                    }
+                    // History holds each cell as written; what the callbacks change is theirs.
+                    if (deferred) {
+                        access.runCallbacks(level, applied, effects);
                     }
                     if (denied != 0) {
                         outcome = CommitReceipt.Outcome.PARTIAL;
@@ -759,6 +777,7 @@ public final class FabricCommitCoordinator {
         private final long bytes;
         private final Function<CommitReceipt, CompletionStage<Void>> afterHistory;
         private final boolean nativeMutation;
+        private final boolean rebase;
         private final CompletableFuture<CommitReceipt> completion = new CompletableFuture<>();
         private final CompletableFuture<Void> preparationDone = new CompletableFuture<>();
         private final CompletableFuture<Void> finalizationDone = new CompletableFuture<>();
@@ -778,12 +797,13 @@ public final class FabricCommitCoordinator {
         // Store immutable input and owned completion before it becomes visible to workers.
         private Pending(Operation operation, PreparedChunkEdit proposal, long bytes,
                 Function<CommitReceipt, CompletionStage<Void>> afterHistory,
-                boolean nativeMutation) {
+                boolean nativeMutation, boolean rebase) {
             this.operation = operation;
             this.proposal = proposal;
             this.bytes = bytes;
             this.afterHistory = afterHistory;
             this.nativeMutation = nativeMutation;
+            this.rebase = rebase;
         }
     }
 }
