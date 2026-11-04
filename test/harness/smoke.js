@@ -183,7 +183,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     frame.sha256 = hash(frame.image)
     writeJson(path.join(rig.root, 'native-control.json'), frame)
     if (!(await send('save-all flush')).includes('Saved the game')) throw new GateError('Save failed')
-    if (extension?.beforeStop) await extension.beforeStop(rig, send, name)
+    if (extension?.beforeStop) await extension.beforeStop(rig, send, name, { client, edit, chatCommand, expected })
     await rig.stop(client.entry)
     await send('stop')
     await rig.wait('saved server exit', () => server.child.exitCode !== null, 30000)
