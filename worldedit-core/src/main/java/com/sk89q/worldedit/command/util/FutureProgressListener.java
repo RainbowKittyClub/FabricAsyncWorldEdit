@@ -32,7 +32,9 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 public class FutureProgressListener implements Runnable {
 
-    private static final Timer timer = new Timer();
+    // A daemon: a server whose main thread returns waits for every non-daemon thread to end, and
+    // this timer is never cancelled, so after one schematic save or load the server never exited.
+    private static final Timer timer = new Timer("WorldEdit progress messages", true);
     private static final int MESSAGE_DELAY = 1000; // 1 second
     private static final int MESSAGE_PERIOD = 10000; // 10 seconds
 
