@@ -49,12 +49,23 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
       return answer
     } catch (error) {
       // A missed deadline usually means a stuck server thread; keep its stacks before teardown kills it.
-      if (/deadline exceeded/.test(error.message) && server?.child?.exitCode === null) {
-        const dump = spawnSync('jcmd', [String(server.child.pid), 'Thread.print', '-l'], { encoding: 'utf8', timeout: 30000 })
-        const file = path.join(rig.root, `server-threads-${Date.now()}.txt`)
-        fs.writeFileSync(file, dump.stdout || dump.stderr || String(dump.error))
-        records.push({ command, threadDump: file })
-      }
+      if (/deadline exceeded/.test(error.message)) dumpThreads(command)
+      throw error
+    }
+  }
+  const dumpThreads = label => {
+    if (server?.child?.exitCode !== null) return
+    const dump = spawnSync('jcmd', [String(server.child.pid), 'Thread.print', '-l'], { encoding: 'utf8', timeout: 30000 })
+    const file = path.join(rig.root, `server-threads-${Date.now()}.txt`)
+    fs.writeFileSync(file, dump.stdout || dump.stderr || String(dump.error))
+    records.push({ command: label, threadDump: file })
+  }
+  // A server that does not exit is stuck in shutdown; keep its stacks as well.
+  const awaitExit = async () => {
+    try {
+      await rig.wait('saved server exit', () => server.child.exitCode !== null, 30000)
+    } catch (error) {
+      dumpThreads('stop')
       throw error
     }
   }
@@ -186,7 +197,7 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     if (extension?.beforeStop) await extension.beforeStop(rig, send, name, { client, edit, chatCommand, expected })
     await rig.stop(client.entry)
     await send('stop')
-    await rig.wait('saved server exit', () => server.child.exitCode !== null, 30000)
+    await awaitExit()
     if (server.child.exitCode !== 0) throw new GateError('Reference server did not stop cleanly')
     if (profile === 'base' && !fs.existsSync(path.join(rig.root, 'lifecycle-first-stopped.json'))) {
       throw new GateError('Scheduler shutdown rejection was not observed')
