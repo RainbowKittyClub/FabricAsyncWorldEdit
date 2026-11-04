@@ -134,48 +134,76 @@ public final class FabricRegionCommands {
                     }
                 }
             }
-            chain.whenComplete((receipts, failure) -> source.getServer().execute(() -> {
-                permissions.remove(operationId);
-                session.remember(actor, world, history, limit);
-                if (failure == null) {
-                    completed++;
-                    source.sendSuccess(() -> Component.literal("Coordinated edit complete: " + history.size()
-                            + " changes (memory history; no neighbor callbacks)."), false);
-                } else {
-                    // A refusal is clean only when no unit recorded or may have made changes.
-                    CommitReceipt unknown = receiptMatching(failure,
-                            receipt -> receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN);
-                    CommitReceipt refusal = history.size() == 0 && unknown == null
-                            ? receiptMatching(failure, FabricRegionCommands::isPreWriteRefusal) : null;
-                    UnitFailure unpublished = history.size() == 0 && unknown == null && refusal == null
-                            && publishedNothing(failure) ? unitFailure(failure) : null;
-                    if (refusal != null) {
-                        source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
-                                + refusal.chunkX() + "," + refusal.chunkZ()
-                                + "; no changes were written: " + refusalReason(refusal)));
-                    } else if (unpublished != null) {
-                        // The operation itself reports publishing nothing, so it failed in preparation.
-                        source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
-                                + unpublished.chunk.x() + "," + unpublished.chunk.z()
-                                + "; no changes were written: " + rootMessage(unpublished)));
-                    } else if (unknown != null) {
-                        source.sendFailure(Component.literal("Coordinated edit failed: chunk "
-                                + unknown.chunkX() + "," + unknown.chunkZ() + " was written but could not be"
-                                + " read back, so it is quarantined; at least " + history.size()
-                                + " recorded changes: " + rootMessage(failure)));
-                    } else {
-                        UnitFailure unit = unitFailure(failure);
-                        source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
-                                + " recorded changes" + (unit == null ? "" : " in chunk " + unit.chunk.x() + ","
-                                + unit.chunk.z()) + ": " + rootMessage(failure)));
+            chain.whenComplete((receipts, failure) -> {
+                // Written to disk before it is remembered or reported, partial results included; a
+                // closed disk history is found again after a restart even if the session never saw it.
+                com.sk89q.worldedit.history.changeset.ChangeSet remembered = history;
+                Throwable unwritten = null;
+                if (com.fastasyncworldedit.core.configuration.Settings.settings().HISTORY.USE_DISK && history.size() > 0) {
+                    try {
+                        remembered = HistoryProvenance.persist(world, actor.getUniqueId(), history,
+                                HistoryProvenance.originOf(history));
+                    } catch (java.io.IOException | RuntimeException writeFailure) {
+                        unwritten = writeFailure;
                     }
                 }
-            }));
+                var durable = remembered;
+                var historyFailure = unwritten;
+                source.getServer().execute(() -> finish(source, session, actor, world, limit, operationId,
+                        history, durable, historyFailure, failure));
+            });
             source.sendSuccess(() -> Component.literal("Coordinated edit admitted: " + operationId), false);
             return 1;
         } catch (Exception failure) {
             source.sendFailure(Component.literal("Coordinated edit refused: " + failure.getMessage()));
             return 0;
+        }
+    }
+
+    // Owner thread: remember the history (disk when written) and report the true outcome.
+    private static void finish(CommandSourceStack source, com.sk89q.worldedit.LocalSession session,
+            com.sk89q.worldedit.fabric.FabricPlayer actor, com.sk89q.worldedit.world.World world,
+            com.fastasyncworldedit.core.limit.FaweLimit limit, UUID operationId, ArrayListHistory history,
+            com.sk89q.worldedit.history.changeset.ChangeSet durable, Throwable historyFailure, Throwable failure) {
+        permissions.remove(operationId);
+        session.remember(actor, world, durable, limit);
+        if (historyFailure != null) {
+            source.sendFailure(Component.literal("Coordinated edit history could not be written to disk; "
+                    + history.size() + " changes stay undoable only until restart: " + rootMessage(historyFailure)));
+        }
+        if (failure == null) {
+            completed++;
+            String kind = durable == history ? "memory" : "disk";
+            source.sendSuccess(() -> Component.literal("Coordinated edit complete: " + history.size()
+                    + " changes (" + kind + " history; no neighbor callbacks)."), false);
+        } else {
+            // A refusal is clean only when no unit recorded or may have made changes.
+            CommitReceipt unknown = receiptMatching(failure,
+                    receipt -> receipt.outcome() == CommitReceipt.Outcome.APPLIED_UNKNOWN);
+            CommitReceipt refusal = history.size() == 0 && unknown == null
+                    ? receiptMatching(failure, FabricRegionCommands::isPreWriteRefusal) : null;
+            UnitFailure unpublished = history.size() == 0 && unknown == null && refusal == null
+                    && publishedNothing(failure) ? unitFailure(failure) : null;
+            if (refusal != null) {
+                source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
+                        + refusal.chunkX() + "," + refusal.chunkZ()
+                        + "; no changes were written: " + refusalReason(refusal)));
+            } else if (unpublished != null) {
+                // The operation itself reports publishing nothing, so it failed in preparation.
+                source.sendFailure(Component.literal("Coordinated edit REFUSED for chunk "
+                        + unpublished.chunk.x() + "," + unpublished.chunk.z()
+                        + "; no changes were written: " + rootMessage(unpublished)));
+            } else if (unknown != null) {
+                source.sendFailure(Component.literal("Coordinated edit failed: chunk "
+                        + unknown.chunkX() + "," + unknown.chunkZ() + " was written but could not be"
+                        + " read back, so it is quarantined; at least " + history.size()
+                        + " recorded changes: " + rootMessage(failure)));
+            } else {
+                UnitFailure unit = unitFailure(failure);
+                source.sendFailure(Component.literal("Coordinated edit failed after " + history.size()
+                        + " recorded changes" + (unit == null ? "" : " in chunk " + unit.chunk.x() + ","
+                        + unit.chunk.z()) + ": " + rootMessage(failure)));
+            }
         }
     }
 

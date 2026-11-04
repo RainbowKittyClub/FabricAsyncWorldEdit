@@ -47,6 +47,7 @@ public class DiskStorageHistory extends FaweStreamChangeSet {
     private File nbttFile;
     private File entfFile;
     private File enttFile;
+    private File provenanceFile;
 
     /*
      * Block data
@@ -108,6 +109,7 @@ public class DiskStorageHistory extends FaweStreamChangeSet {
         //Switch file ending due to new (sort-of) format. (Added e for Extended height)
         bdFile = new File(folder, index + ".bd");
         bioFile = new File(folder, index + ".bio");
+        provenanceFile = new File(folder, index + ".prov");
     }
 
     private void init(UUID uuid, int i) {
@@ -136,6 +138,7 @@ public class DiskStorageHistory extends FaweStreamChangeSet {
         entfFile.delete();
         enttFile.delete();
         bioFile.delete();
+        provenanceFile.delete();
     }
 
     public void undo(Actor actor, Region[] regions) {
@@ -195,6 +198,11 @@ public class DiskStorageHistory extends FaweStreamChangeSet {
 
     public File getBioFile() {
         return bioFile;
+    }
+
+    /** Platform-written record of who made this history, kept and deleted with its streams. */
+    public File getProvenanceFile() {
+        return provenanceFile;
     }
 
     public int getIndex() {

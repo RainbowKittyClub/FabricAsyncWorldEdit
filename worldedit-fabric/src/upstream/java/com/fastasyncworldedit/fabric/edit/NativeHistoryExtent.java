@@ -1,11 +1,17 @@
 package com.fastasyncworldedit.fabric.edit;
 
+import java.util.UUID;
+
 import com.fastasyncworldedit.core.extent.HistoryExtent;
 import com.fastasyncworldedit.core.history.changeset.AbstractChangeSet;
+import com.fastasyncworldedit.core.nbt.FaweCompoundTag;
 import com.sk89q.worldedit.WorldEditException;
+import com.sk89q.worldedit.entity.BaseEntity;
+import com.sk89q.worldedit.entity.Entity;
 import com.sk89q.worldedit.extent.Extent;
 import com.sk89q.worldedit.fabric.internal.NBTConverter;
 import com.sk89q.worldedit.math.BlockVector3;
+import com.sk89q.worldedit.util.Location;
 import com.sk89q.worldedit.world.biome.BiomeType;
 import com.sk89q.worldedit.world.biome.BiomeTypes;
 import com.sk89q.worldedit.world.block.BaseBlock;
@@ -14,22 +20,20 @@ import com.sk89q.worldedit.world.block.BlockStateHolder;
 
 /** Native history consumes actual coordinator receipts, including writes followed by failure. */
 public final class NativeHistoryExtent extends HistoryExtent {
-    private static final java.util.concurrent.ConcurrentMap<com.sk89q.worldedit.history.changeset.ChangeSet, Origin>
-            ORIGINS = new com.google.common.collect.MapMaker().weakKeys().makeMap();
-    private static final Origin UNKNOWN = new Origin(null, null);
     private final Runnable detach;
+    // The bound session, which is also what its receipts name; null without a bound actor.
+    private final HistoryProvenance.Origin session;
 
-    /** In-memory provenance; missing or mixed historical identities stay explicitly unknown. */
-    public record Origin(java.util.UUID operationId, java.util.UUID actorId) { }
-
-    /** Legacy/reloaded history has no identity until a durable provenance format is implemented. */
-    public static Origin originOf(com.sk89q.worldedit.history.changeset.ChangeSet history) {
-        return ORIGINS.getOrDefault(history, UNKNOWN);
+    /** In-memory or durable provenance; missing or mixed historical identities stay unknown. */
+    public static HistoryProvenance.Origin originOf(com.sk89q.worldedit.history.changeset.ChangeSet history) {
+        return HistoryProvenance.originOf(history);
     }
 
     /** Keep upstream history traversal, but attach recording at the native publication boundary. */
-    public NativeHistoryExtent(Extent extent, AbstractChangeSet history, Runnable detach) {
+    public NativeHistoryExtent(Extent extent, AbstractChangeSet history, HistoryProvenance.Origin session,
+            Runnable detach) {
         super(extent, history);
+        this.session = session;
         this.detach = detach;
     }
 
@@ -48,6 +52,35 @@ public final class NativeHistoryExtent extends HistoryExtent {
         return getExtent().setBiome(x, y, z, biome);
     }
 
+    // History names the entity actually created: its own UUID and position, not the requested
+    // clipboard state, which carries the source entity's UUID and would undo the wrong entity.
+    @Override
+    public Entity createEntity(Location location, BaseEntity state) {
+        return recordCreated(getExtent().createEntity(location, state));
+    }
+
+    @Override
+    public Entity createEntity(Location location, BaseEntity state, UUID uuid) {
+        return recordCreated(getExtent().createEntity(location, state, uuid));
+    }
+
+    private Entity recordCreated(Entity created) {
+        if (created != null) {
+            BaseEntity actual = com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(created::getState);
+            if (actual == null || actual.getNbt() == null) {
+                throw new IllegalStateException("Created entity has no readable state for history");
+            }
+            AbstractChangeSet history = getChangeSet();
+            synchronized (history) {
+                if (session != null) {
+                    HistoryProvenance.note(history, session, history.longSize() == 0);
+                }
+                history.addEntityCreate(FaweCompoundTag.of(actual.getNbt()));
+            }
+        }
+        return created;
+    }
+
     @Override
     public Extent disableHistory() {
         detach.run();
@@ -60,10 +93,8 @@ public final class NativeHistoryExtent extends HistoryExtent {
         synchronized (history) {
             if (!receipt.applied().isEmpty()) {
                 var context = receipt.context();
-                Origin origin = new Origin(context.sessionId(), context.actorId());
-                ORIGINS.compute(history, (key, previous) -> previous == null
-                        ? (history.size() == 0 && origin.operationId() != null ? origin : UNKNOWN)
-                        : (previous.equals(origin) ? previous : UNKNOWN));
+                HistoryProvenance.note(history, new HistoryProvenance.Origin(context.sessionId(), context.actorId()),
+                        history.longSize() == 0);
             }
             for (var applied : receipt.applied()) {
                 EditDelta delta = applied.delta();

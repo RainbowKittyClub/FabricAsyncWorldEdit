@@ -444,6 +444,13 @@ public final class FabricEdits {
     // Record exact before/after values through upstream history without its enqueue-only wrappers.
     private static void record(ChangeSet history, CommitReceipt receipt) {
         synchronized (history) {
+            if (!receipt.applied().isEmpty()) {
+                // A unit's parent is its command operation, which is what an undo names as its parent.
+                var context = receipt.context();
+                var operation = context.parentId() != null ? context.parentId() : context.operationId();
+                HistoryProvenance.note(history, new HistoryProvenance.Origin(operation, context.actorId()),
+                        history.size() == 0);
+            }
             for (var applied : receipt.applied()) {
                 EditDelta delta = applied.delta();
                 BlockVector3 pos = BlockVector3.at(delta.x(), delta.y(), delta.z());

@@ -135,6 +135,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -216,7 +217,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public FabricWorld bindReplay(com.sk89q.worldedit.extension.platform.Actor actor,
             com.sk89q.worldedit.history.changeset.ChangeSet history, boolean redo) {
-        NativeHistoryExtent.Origin origin = NativeHistoryExtent.originOf(history);
+        var origin = NativeHistoryExtent.originOf(history);
         EditActorContext context = actor == null ? null : new EditActorContext(actor.getUniqueId(),
                 actor.getName(), redo ? EditActorContext.Source.REDO : EditActorContext.Source.UNDO,
                 java.util.UUID.randomUUID(), origin.operationId(), origin.actorId(),
@@ -228,7 +229,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public Extent withCommittedHistory(Extent extent,
             com.fastasyncworldedit.core.history.changeset.AbstractChangeSet history) {
-        NativeHistoryExtent committed = new NativeHistoryExtent(extent, history,
+        var session = editContext == null ? null
+                : new com.fastasyncworldedit.fabric.edit.HistoryProvenance.Origin(editContext.operationId(), editContext.actorId());
+        NativeHistoryExtent committed = new NativeHistoryExtent(extent, history, session,
                 () -> nativeHistory = receipt -> { });
         nativeHistory = committed::record;
         return committed;
@@ -862,8 +865,37 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Nullable
     @Override
     public Entity createEntity(Location location, BaseEntity entity) {
+        return TaskManager.taskManager().sync(() -> spawn(location, entity, null));
+    }
+
+    /** Redo of a creation and undo of a removal: the entity comes back as itself, UUID included. */
+    @Nullable
+    @Override
+    public Entity createEntity(Location location, BaseEntity entity, UUID uuid) {
+        return TaskManager.taskManager().sync(() -> spawn(location, entity, uuid));
+    }
+
+    /** Undo of a creation: remove exactly that entity, wherever it went; absent means already gone. */
+    @Override
+    public void removeEntity(int x, int y, int z, UUID uuid) {
+        TaskManager.taskManager().sync(() -> {
+            NativeClaims.unsupported("entity removal");
+            net.minecraft.world.entity.Entity target = ((ServerLevel) getWorld()).getEntity(uuid);
+            if (target != null && !(target instanceof net.minecraft.world.entity.player.Player)) {
+                target.discard();
+            }
+            return null;
+        });
+    }
+
+    // Owner thread only. A forced UUID already in use is refused rather than duplicated.
+    @Nullable
+    private Entity spawn(Location location, BaseEntity entity, @Nullable UUID uuid) {
         NativeClaims.unsupported("entity creation");
         ServerLevel world = (ServerLevel) getWorld();
+        if (uuid != null && world.getEntity(uuid) != null) {
+            return null;
+        }
         String entityId = entity.getType().id();
         final Optional<EntityType<?>> entityType = world.registryAccess().lookupOrThrow(Registries.ENTITY_TYPE).getOptional(Identifier.parse(entityId));
         if (entityType.isEmpty()) {
@@ -878,6 +910,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             tag = new net.minecraft.nbt.CompoundTag();
         }
         tag.putString("id", entityId);
+        if (uuid != null) {
+            tag.putIntArray("UUID", net.minecraft.core.UUIDUtil.uuidToIntArray(uuid));
+        }
 
         net.minecraft.world.entity.Entity createdEntity = EntityType.loadEntityRecursive(entityType.get(), tag, world, EntitySpawnReason.COMMAND, (loadedEntity) -> {
             loadedEntity.absSnapTo(location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
