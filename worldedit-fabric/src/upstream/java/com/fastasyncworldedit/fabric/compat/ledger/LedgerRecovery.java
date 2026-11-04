@@ -124,8 +124,7 @@ final class LedgerRecovery {
 
     private Decision classify(LedgerOutbox.Unit unit) {
         ServerLevel level = access.level(unit.origin().dimension());
-        List<EditDelta> relevant = unit.receipt() == null ? unit.deltas()
-                : unit.receipt().applied().stream().map(applied -> unit.deltas().get(applied.index())).toList();
+        List<EditDelta> relevant = unit.receipt() == null ? unit.deltas() : LedgerOutbox.applied(unit);
         int atBefore = 0;
         int atAfter = 0;
         String other = null;
@@ -171,9 +170,11 @@ final class LedgerRecovery {
     // The stored timestamp makes the rebuilt rows byte-identical to the ones first sent.
     private CompletableFuture<Void> resubmit(LedgerOutbox.Unit unit) {
         List<ProducerBatch.Entry> entries = new ArrayList<>();
-        for (LedgerOutbox.Applied applied : unit.receipt().applied()) {
-            entries.add(new ProducerBatch.Entry(applied.sequence(), LedgerPayloads.action(unit.origin(),
-                    applied.sequence(), unit.deltas().get(applied.index()), unit.receipt().timestamp())));
+        List<EditDelta> deltas = LedgerOutbox.applied(unit);
+        for (int position = 0; position < deltas.size(); position++) {
+            long sequence = unit.receipt().applied().get(position).sequence();
+            entries.add(new ProducerBatch.Entry(sequence, LedgerPayloads.action(unit.origin(), sequence,
+                    deltas.get(position), unit.receipt().timestamp())));
         }
         ProducerBatch batch = new ProducerBatch(LedgerPayloads.SOURCE, unit.origin().operation(), entries);
         return append.apply(batch).toCompletableFuture()

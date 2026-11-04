@@ -181,7 +181,8 @@ public final class LedgerEditBridge implements EditIntegration {
             List<LedgerOutbox.Applied> applied = new ArrayList<>(receipt.applied().size());
             List<ProducerBatch.Entry> entries = new ArrayList<>(receipt.applied().size());
             for (CommitReceipt.AppliedDelta delta : receipt.applied()) {
-                applied.add(new LedgerOutbox.Applied(delta.sequence(), index.get(key(delta.delta()))));
+                applied.add(new LedgerOutbox.Applied(delta.sequence(), index.get(key(delta.delta())),
+                        delta.delta().after()));
                 entries.add(new ProducerBatch.Entry(delta.sequence(),
                         LedgerPayloads.action(origin, delta.sequence(), delta.delta(), timestamp)));
             }

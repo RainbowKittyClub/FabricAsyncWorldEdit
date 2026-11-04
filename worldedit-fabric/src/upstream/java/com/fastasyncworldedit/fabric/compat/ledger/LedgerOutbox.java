@@ -57,14 +57,27 @@ final class LedgerOutbox {
         }
     }
 
-    /** What was applied: Ledger sequence and index into the intent's deltas, and the row timestamp. */
+    /** What was applied, and the row timestamp. */
     record Receipt(Instant timestamp, List<Applied> applied) {
         Receipt {
             applied = List.copyOf(applied);
         }
     }
 
-    record Applied(long sequence, int index) {
+    /**
+     * One applied delta: its Ledger sequence, its intent delta and the after value read back from
+     * the world, which can differ from the proposed one (block-entity NBT gains saved metadata).
+     */
+    record Applied(long sequence, int index, EditValue after) {
+    }
+
+    /** The applied deltas as written: intent before values, read-back after values. */
+    static List<EditDelta> applied(Unit unit) {
+        return unit.receipt().applied().stream().map(applied -> {
+            EditDelta proposed = unit.deltas().get(applied.index());
+            return new EditDelta(proposed.kind(), proposed.x(), proposed.y(), proposed.z(), proposed.key(),
+                    proposed.before(), applied.after());
+        }).toList();
     }
 
     private final Path directory;
@@ -261,7 +274,7 @@ final class LedgerOutbox {
                 if (index < 0 || index >= deltas.size()) {
                     throw new IllegalStateException("receipt index " + index + " is outside the intent");
                 }
-                applied.add(new Applied(entry.get("sequence").getAsLong(), index));
+                applied.add(new Applied(entry.get("sequence").getAsLong(), index, value(entry.get("after"))));
             }
             receipt = new Receipt(Instant.parse(stored.get("timestamp").getAsString()), applied);
         }
@@ -312,6 +325,7 @@ final class LedgerOutbox {
             JsonObject item = new JsonObject();
             item.addProperty("sequence", entry.sequence());
             item.addProperty("index", entry.index());
+            item.add("after", json(entry.after()));
             applied.add(item);
         }
         stored.add("applied", applied);
