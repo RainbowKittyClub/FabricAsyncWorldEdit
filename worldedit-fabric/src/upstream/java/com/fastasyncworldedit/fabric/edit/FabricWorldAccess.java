@@ -120,13 +120,21 @@ public final class FabricWorldAccess {
 
     /** Compare every declared dependency plus every intended before-value immediately before commit. */
     public boolean matches(PreparedChunkEdit proposal, ServerLevel level) {
+        return matches(proposal, level, true);
+    }
+
+    /**
+     * As {@link #matches(PreparedChunkEdit, ServerLevel)}; without revisions only values count, for
+     * native units whose targets are absolute, so changes elsewhere in the chunk do not conflict.
+     */
+    public boolean matches(PreparedChunkEdit proposal, ServerLevel level, boolean revisions) {
         owner();
         if (!mappingValid || proposal.registryGeneration() != mapping.generation()) {
             return false;
         }
         for (PreparedChunkEdit.ReadDependency dependency : proposal.reads()) {
             LevelChunk chunk = loadedChunk(level, dependency.x() >> 4, dependency.z() >> 4);
-            if (((ChunkRevision) chunk).worldedit$editRevision() != dependency.revision()
+            if (revisions && ((ChunkRevision) chunk).worldedit$editRevision() != dependency.revision()
                     || !Objects.equals(dependency.value(), read(level, dependency.kind(), dependency.x(),
                             dependency.y(), dependency.z(), dependency.key()))) {
                 return false;
@@ -151,14 +159,39 @@ public final class FabricWorldAccess {
         validatePayloads(proposal, level);
     }
 
-    /** Validate the one-cell native path without substituting section-publication side effects. */
+    /** Validate a native unit without substituting section-publication side effects. */
     public void validateNative(PreparedChunkEdit proposal, ServerLevel level) {
         owner();
-        if (proposal.writes().size() != 1
-                || proposal.context().sideEffects().shouldApply(SideEffect.VALIDATION)) {
+        var effects = proposal.context().sideEffects();
+        if (proposal.writes().isEmpty() || effects.shouldApply(SideEffect.VALIDATION)) {
             throw new UnsupportedOperationException("Native targets must be validated before authorization");
         }
+        // A callback may change another cell of the same unit after its before-value was read.
+        if (proposal.writes().size() > 1
+                && (effects.shouldApply(SideEffect.NEIGHBORS) || effects.shouldApply(SideEffect.UPDATE))) {
+            throw new UnsupportedOperationException("Cross-cell callbacks require one cell per native unit");
+        }
         validatePayloads(proposal, level);
+    }
+
+    /** The lifecycle refusal this delta would meet at publication, or null. */
+    public UnsupportedBlockException unsupported(EditDelta delta) {
+        if (delta.kind() != EditDelta.Kind.BLOCK) {
+            return null;
+        }
+        for (EditValue value : new EditValue[] {delta.before(), delta.after()}) {
+            var state = mapping.nativeState(value.id());
+            if (!SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
+                return new UnsupportedBlockException(value.id(), delta.x(), delta.y(), delta.z());
+            }
+        }
+        return null;
+    }
+
+    /** Whether either side of this delta holds a block entity; such cells count against the 64. */
+    public boolean blockEntityCell(EditDelta delta) {
+        return delta.kind() == EditDelta.Kind.BLOCK && (mapping.nativeState(delta.before().id()).hasBlockEntity()
+                || mapping.nativeState(delta.after().id()).hasBlockEntity());
     }
 
     // Both writers require the same payload/lifecycle capabilities before changing anything.

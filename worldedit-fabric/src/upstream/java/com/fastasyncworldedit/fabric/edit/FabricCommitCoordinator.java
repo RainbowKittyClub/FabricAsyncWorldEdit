@@ -81,10 +81,10 @@ public final class FabricCommitCoordinator {
         return submit(proposal, afterHistory, false);
     }
 
-    /** Use the same admission, authorization, receipts and finalization for a single WNA mutation. */
+    /** Use the same admission, authorization, receipts and finalization for one chunk's WNA cells. */
     public synchronized CompletionStage<CommitReceipt> submitNative(PreparedChunkEdit proposal) {
-        if (proposal.writes().size() != 1) {
-            throw new IllegalArgumentException("Native publication requires exactly one cell");
+        if (proposal.writes().isEmpty()) {
+            throw new IllegalArgumentException("Native publication requires at least one cell");
         }
         return submit(proposal, receipt -> CompletableFuture.completedFuture(null), true);
     }
@@ -143,8 +143,68 @@ public final class FabricCommitCoordinator {
                 }
             }
         }
+        heartbeats++;
         if (chosen != null) {
+            long start = System.nanoTime();
             publish(chosen);
+            long nanos = System.nanoTime() - start;
+            publishNanos += nanos;
+            maxPublishNanos = Math.max(maxPublishNanos, nanos);
+            CommitReceipt receipt = chosen.receipt;
+            synchronized (timeline) {
+                if (timeline.size() == TIMELINE) timeline.removeFirst();
+                timeline.addLast(new Publication(server.getTickCount(), chosen.proposal.context().sessionId(),
+                        chosen.proposal.chunkX(), chosen.proposal.chunkZ(), chosen.proposal.writes().size(),
+                        receipt == null ? 0 : receipt.applied().size(),
+                        receipt == null ? "" : receipt.outcome().name(), nanos));
+            }
+        } else {
+            synchronized (this) {
+                // Work that could go out this heartbeat but did not; units already published are excluded.
+                if (pending.stream().anyMatch(unit -> !unit.busy)) idleWithPending++;
+            }
+        }
+    }
+
+    // Owner thread: finish, history and relight/send lags after publication, totals and maxima.
+    private record Lags(long finishTotal, long finishMax, long historyTotal, long historyMax,
+            long maintenanceTotal, long maintenanceMax) {
+        private Lags add(long finish, long history, long maintenance) {
+            return new Lags(finishTotal + finish, Math.max(finishMax, finish), historyTotal + history,
+                    Math.max(historyMax, history), maintenanceTotal + maintenance, Math.max(maintenanceMax, maintenance));
+        }
+    }
+
+    private long finished;
+    private Lags finishLag = new Lags(0, 0, 0, 0, 0, 0);
+
+    private static final int TIMELINE = 1024;
+    private final java.util.ArrayDeque<Publication> timeline = new java.util.ArrayDeque<>();
+    private long heartbeats;
+    private long idleWithPending;
+    private long publishNanos;
+    private long maxPublishNanos;
+
+    /** One heartbeat's publication: its server tick, session, chunk, size, outcome and owner-thread time. */
+    public record Publication(int tick, java.util.UUID session, int chunkX, int chunkZ, int cells,
+            int applied, String outcome, long nanos) { }
+
+    /** Heartbeats, those that published nothing while units were pending, and publication time. */
+    public Map<String, Long> timing() {
+        owner();
+        return Map.ofEntries(Map.entry("heartbeats", heartbeats), Map.entry("idleWithPending", idleWithPending),
+                Map.entry("publishNanos", publishNanos), Map.entry("maxPublishNanos", maxPublishNanos),
+                Map.entry("finished", finished), Map.entry("finishNanos", finishLag.finishTotal()),
+                Map.entry("maxFinishNanos", finishLag.finishMax()), Map.entry("historyNanos", finishLag.historyTotal()),
+                Map.entry("maxHistoryNanos", finishLag.historyMax()),
+                Map.entry("maintenanceNanos", finishLag.maintenanceTotal()),
+                Map.entry("maxMaintenanceNanos", finishLag.maintenanceMax()));
+    }
+
+    /** The latest publications, oldest first. */
+    public List<Publication> timeline() {
+        synchronized (timeline) {
+            return List.copyOf(timeline);
         }
     }
 
@@ -210,6 +270,12 @@ public final class FabricCommitCoordinator {
     /** Number of admitted units, including asynchronous finalization. */
     public synchronized int pendingCount() {
         return pending.size();
+    }
+
+    /** Whether one more operation of these units and bytes would be admitted now. */
+    public synchronized boolean hasRoom(int units, long bytes) {
+        return !stopped && operations.size() < maxPending && pending.size() + units <= maxPending
+                && bytes <= maxBytes - retainedBytes;
     }
 
     /** Explicit operation lifetime; sealing prevents races with completion registration. */
@@ -375,7 +441,7 @@ public final class FabricCommitCoordinator {
                         || !FabricRegionCommands.authorized(proposal.context(), player)) {
                     throw new OperatorRefusedException();
                 }
-                if (!access.matches(proposal, level)) {
+                if (!access.matches(proposal, level, !unit.nativeMutation)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
                 } else {
                     if (!unit.nativeMutation) {
@@ -436,7 +502,7 @@ public final class FabricCommitCoordinator {
                     for (EditIntegration.Reservation reservation : unit.reservations) {
                         reservation.beforePublication(level, finalWrite, directSections);
                     }
-                    if (!access.matches(proposal, level)) {
+                    if (!access.matches(proposal, level, !unit.nativeMutation)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
                     }
                     for (List<EditDelta> group : access.publicationUnits(writeSet)) {
@@ -449,8 +515,10 @@ public final class FabricCommitCoordinator {
                             if (!unit.nativeMutation) {
                                 access.writeUnit(level, group, proposal.context().sideEffects(),
                                         directSections, groupRoute);
-                            } else if (!group.isEmpty()) {
-                                access.writeNative(level, group.getFirst(), proposal.context().sideEffects());
+                            } else {
+                                for (EditDelta delta : group) {
+                                    access.writeNative(level, delta, proposal.context().sideEffects());
+                                }
                             }
                         } finally {
                             for (EditDelta delta : group) {
@@ -501,6 +569,7 @@ public final class FabricCommitCoordinator {
             publishedUnits.incrementAndGet();
         }
         if (!applied.isEmpty()) reached(unit, "published");
+        unit.publishedNanos = System.nanoTime();
         finalizeUnit(unit, level, receipt, failure);
     }
 
@@ -514,6 +583,7 @@ public final class FabricCommitCoordinator {
         CompletionStage<Void> writtenHistory = CompletableFuture.completedFuture(null).thenComposeAsync(
                 unused -> Objects.requireNonNull(unit.operation.history.apply(receipt)), detachedExecutor)
                 .handle((unused, failure) -> {
+                    unit.historyNanos = System.nanoTime();
                     historyFailure.set(failure);
                     if (failure != null) finalizationFailure.compareAndSet(null, failure);
                     return (Void) null;
@@ -537,6 +607,7 @@ public final class FabricCommitCoordinator {
             }).thenCompose(unused -> access.completePublication(level, receipt, maintenanceFailure.get() == null))
                     .thenCompose(unused -> {
                         owner();
+                        unit.maintainedNanos = System.nanoTime();
                         if (unit.terminal || maintenanceFailure.get() != null) return CompletableFuture.completedFuture(null);
                         CompletionStage<Void> publication = CompletableFuture.completedFuture(null);
                         for (EditIntegration.Reservation reservation : unit.reservations) {
@@ -605,6 +676,12 @@ public final class FabricCommitCoordinator {
             return;
         }
         unit.terminal = true;
+        if (unit.publishedNanos != 0) {
+            long now = System.nanoTime();
+            finished++;
+            finishLag = finishLag.add(now - unit.publishedNanos, unit.historyNanos - unit.publishedNanos,
+                    unit.maintainedNanos == 0 ? 0 : unit.maintainedNanos - unit.publishedNanos);
+        }
         Throwable releaseFailure = null;
         for (EditIntegration.Reservation reservation : unit.reservations) {
             try {
@@ -693,6 +770,10 @@ public final class FabricCommitCoordinator {
         private boolean terminal;
         private ServerLevel level;
         private CommitReceipt receipt;
+        // Finalization stages after publication, for timing only.
+        private volatile long publishedNanos;
+        private volatile long historyNanos;
+        private volatile long maintainedNanos;
 
         // Store immutable input and owned completion before it becomes visible to workers.
         private Pending(Operation operation, PreparedChunkEdit proposal, long bytes,
