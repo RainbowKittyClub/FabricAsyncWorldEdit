@@ -857,20 +857,23 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public int hashCode() {
-        return getWorld().hashCode();
+        return id().hashCode();
     }
 
+    // Every dimension shares the save's level name, so a world matches by dimension, through FAWE's
+    // wrappers: matching by name kept an overworld selection for a player in another dimension.
     @Override
     public boolean equals(Object o) {
-        if ((o instanceof FabricWorld other)) {
+        if (!(o instanceof com.sk89q.worldedit.world.World world)) {
+            return false;
+        }
+        var unwrapped = com.fastasyncworldedit.core.wrappers.WorldWrapper.unwrap(world);
+        if (unwrapped instanceof FabricWorld other) {
             Level otherWorld = other.worldRef.get();
             Level thisWorld = worldRef.get();
             return otherWorld != null && otherWorld.equals(thisWorld);
-        } else if (o instanceof com.sk89q.worldedit.world.World) {
-            return ((com.sk89q.worldedit.world.World) o).getName().equals(getName());
-        } else {
-            return false;
         }
+        return unwrapped.id().equals(id());
     }
 
     @Override
