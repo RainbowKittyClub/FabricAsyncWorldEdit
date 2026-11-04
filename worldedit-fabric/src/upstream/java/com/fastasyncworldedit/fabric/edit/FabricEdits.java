@@ -220,6 +220,7 @@ public final class FabricEdits {
     public Map<String, Long> publicationStatistics() {
         owner();
         Map<String, Long> stats = new LinkedHashMap<>(access.statistics());
+        stats.putAll(coordinator.milestones());
         stats.put("repreparations", repreparations);
         return Map.copyOf(stats);
     }

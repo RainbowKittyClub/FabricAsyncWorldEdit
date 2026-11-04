@@ -189,6 +189,18 @@ public final class FabricCommitCoordinator {
         return shutdown;
     }
 
+    // Units that reached each milestone, counted on whichever thread reached it; relit and sent are
+    // counted by world access.
+    private final java.util.concurrent.atomic.AtomicLong publishedUnits = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong reconciledUnits = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong recordedUnits = new java.util.concurrent.atomic.AtomicLong();
+
+    /** Units that reached the published, reconciled and recorded milestones. */
+    public Map<String, Long> milestones() {
+        return Map.of("published", publishedUnits.get(), "reconciled", reconciledUnits.get(),
+                "recorded", recordedUnits.get());
+    }
+
     /** Current retained admission bytes, including in-flight recording. */
     public synchronized long retainedBytes() {
         return retainedBytes;
@@ -483,6 +495,7 @@ public final class FabricCommitCoordinator {
             unit.receipt = receipt;
             unit.operation.published.add(receipt);
             unit.operation.phase = Phase.PUBLISHED;
+            publishedUnits.incrementAndGet();
         }
         finalizeUnit(unit, level, receipt, failure);
     }
@@ -545,6 +558,7 @@ public final class FabricCommitCoordinator {
                     throw new RejectedExecutionException("Shutdown interrupted finalization");
                 }
                 unit.operation.phase = Phase.RECONCILED;
+                reconciledUnits.incrementAndGet();
             }
             CompletionStage<Void> recorded;
             try {
@@ -626,6 +640,7 @@ public final class FabricCommitCoordinator {
         retainedBytes -= unit.bytes;
         if (problem == null) {
             unit.operation.phase = Phase.RECORDED;
+            recordedUnits.incrementAndGet();
             unit.completion.complete(terminal);
         } else {
             unit.completion.completeExceptionally(new CommitFailure(terminal, problem));
