@@ -1811,10 +1811,13 @@ public class LocalSession implements TextureHolder {
         //FAWE start
         builder.command(command);
         builder.fastMode(this.fastMode);
-        builder.changeSet(
-                Settings.settings().HISTORY.USE_DISK,
-                actor != null ? actor.getUniqueId() : Identifiable.CONSOLE
-        );
+        // Fast mode keeps no history, as //fast tells the player.
+        if (!this.fastMode) {
+            builder.changeSet(
+                    Settings.settings().HISTORY.USE_DISK,
+                    actor != null ? actor.getUniqueId() : Identifiable.CONSOLE
+            );
+        }
         if (shouldForceWna(world)) {
             builder.forceWNA();
         }
