@@ -159,6 +159,27 @@ module.exports = ({ rig, check, paced }) => {
       }
       check('callback-border-like-vanilla', across.every(cell => cell.edit === cell.vanilla), across)
 
+      // Publication cost with OPAC: 16 chunks of 1024 cells, the player's, the stranger's, nobody's.
+      await send('forceload add 6400 6400 6591 6463')
+      await send('fill 6400 79 6400 6591 79 6463 minecraft:stone')
+      for (let cz = 400; cz <= 403; cz++) {
+        for (let cx = 400; cx <= 411; cx++) await claim(cx < 404 ? 'owner' : cx < 408 ? 'stranger' : 'none', cx, cz)
+      }
+      const cost = {}
+      for (const [label, x] of [['own', 6400], ['stranger', 6464], ['unclaimed', 6528]]) {
+        await send(`fill ${x} 80 6400 ${x + 63} 83 6463 minecraft:air`)
+        await select(x, 80, 6400, x + 63, 83, 6463)
+        const since = await now(send)
+        await chatCommand('/set stone', /Operation completed/)
+        const units = (await probe(send, `timeline ${since}`)).publications
+          .filter(entry => entry.chunkZ >= 400 && entry.chunkZ <= 403 && entry.chunkX >> 2 === x >> 6)
+        const ms = units.map(entry => entry.nanos / 1e6)
+        cost[label] = { units: units.length, applied: units.reduce((sum, entry) => sum + entry.applied, 0),
+          meanMs: ms.reduce((sum, value) => sum + value, 0) / (ms.length || 1), maxMs: Math.max(0, ...ms) }
+      }
+      check('opac-unit-cost', cost.own.units === 16 && cost.own.applied === 16384 && cost.stranger.applied === 0 &&
+        cost.unclaimed.applied === 16384, cost)
+
       await verifyAll(send, '')
       const coverage = delta(before, await probe(send, 'coverage'))
       check('every-route-every-stage', ROUTES.every(([route, source]) =>
