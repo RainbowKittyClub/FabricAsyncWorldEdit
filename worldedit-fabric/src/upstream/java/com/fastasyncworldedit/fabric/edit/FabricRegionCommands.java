@@ -26,6 +26,7 @@ import net.minecraft.server.level.ServerPlayer;
 /** Opt-in production commands for bounded cuboid edits with disk history and no neighbor callbacks. */
 public final class FabricRegionCommands {
     private static final Map<UUID, String> permissions = new ConcurrentHashMap<>();
+    private static final Map<UUID, java.util.function.BooleanSupplier> authorities = new ConcurrentHashMap<>();
     // Owner thread: each player's operations still running, so cancel, disconnect and stop reach them.
     private static final Map<UUID, List<Running>> running = new java.util.HashMap<>();
     private static long completed;
@@ -76,8 +77,23 @@ public final class FabricRegionCommands {
         });
     }
 
+    /**
+     * A unit whose operator's right to make it is decided elsewhere (Ledger's replay permission);
+     * asked at publication like a command's own permission. Owner thread.
+     */
+    public static void authorizeWith(UUID operation, java.util.function.BooleanSupplier authority) {
+        authorities.put(operation, authority);
+    }
+
+    /** Drop {@link #authorizeWith}'s entry once its unit is finished. */
+    public static void forgetAuthority(UUID operation) {
+        authorities.remove(operation);
+    }
+
     /** Recheck the command's current permission alongside integration authorization for every unit. */
     public static boolean authorized(EditActorContext context, ServerPlayer player) {
+        var authority = authorities.get(context.operationId());
+        if (authority != null) return authority.getAsBoolean();
         if (context.source() != EditActorContext.Source.PLAYER) return true;
         String node = permissions.get(context.operationId());
         return node != null && FabricAdapter.adaptPlayer(player).hasPermission(node);

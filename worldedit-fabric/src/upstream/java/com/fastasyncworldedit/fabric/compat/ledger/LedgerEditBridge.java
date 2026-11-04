@@ -38,6 +38,7 @@ import net.minecraft.world.level.storage.LevelResource;
  */
 public final class LedgerEditBridge implements EditIntegration {
     static final int REQUIRED_API_VERSION = 1;
+    static final int REQUIRED_REPLAY_VERSION = 1;
     private static final Logger LOGGER = LogManagerCompat.getLogger();
     private static final long FIRST_RETRY_MS = 250;
     private static final long MAX_RETRY_MS = 5_000;
@@ -45,6 +46,7 @@ public final class LedgerEditBridge implements EditIntegration {
     // Null when the installed Ledger supports the producer batch contract.
     private final String incompatibility;
     private LedgerOutbox outbox;
+    private LedgerReplayGuard replayGuard;
     private volatile boolean stopping;
     // Null once recovery finished; otherwise why proposals are refused.
     private volatile String notReady = "the Ledger audit bridge has not started";
@@ -71,6 +73,13 @@ public final class LedgerEditBridge implements EditIntegration {
         if (incompatibility != null) {
             return;
         }
+        // Every Ledger rollback and restore then changes the world through the coordinator.
+        if (replayApi()) {
+            replayGuard = new LedgerReplayGuard(server, access);
+            LedgerApi.get().registerReplayGuard(replayGuard);
+        } else {
+            LOGGER.warn("The installed Ledger has no replay API; its rollbacks bypass FAWE's protection checks");
+        }
         outbox = new LedgerOutbox(server.getWorldPath(LevelResource.ROOT).resolve("fawe").resolve("ledger-outbox"));
         notReady = "Ledger audit recovery is still running";
         new LedgerRecovery(server, access, outbox, batch -> append(batch, FIRST_RETRY_MS), () -> stopping).run()
@@ -87,12 +96,21 @@ public final class LedgerEditBridge implements EditIntegration {
     @Override
     public void stop() {
         stopping = true;
+        if (replayGuard != null) {
+            LedgerApi.get().unregisterReplayGuard(replayGuard);
+        }
     }
 
     @Override
     public CompletionStage<Reservation> prepare(PreparedChunkEdit proposal) {
         if (incompatibility != null) {
             return refuse("Ledger audit is required but " + incompatibility);
+        }
+        var source = proposal.context().source();
+        if (source == EditActorContext.Source.LEDGER_ROLLBACK || source == EditActorContext.Source.LEDGER_RESTORE) {
+            // Ledger flags the original rows and writes one audit row for the replay; rows for its
+            // writes would duplicate the originals. Scoped to this unit, not to other edits.
+            return CompletableFuture.completedFuture(new Unrecorded());
         }
         String waiting = notReady;
         if (waiting != null) {
@@ -126,6 +144,40 @@ public final class LedgerEditBridge implements EditIntegration {
 
     private static CompletableFuture<Reservation> refuse(String reason) {
         return CompletableFuture.failedFuture(new IllegalStateException(reason + "; no writes were made"));
+    }
+
+    private static boolean replayApi() {
+        try {
+            return LedgerApi.class.getField("REPLAY_API_VERSION").getInt(null) >= REQUIRED_REPLAY_VERSION;
+        } catch (ReflectiveOperationException | LinkageError missing) {
+            return false;
+        }
+    }
+
+    /** A replay unit: authorizes everything here (claims and permission are other checks) and records nothing. */
+    private static final class Unrecorded implements Reservation {
+        @Override
+        public boolean authorize(ServerLevel level, ServerPlayer operator, EditActorContext context, EditDelta delta) {
+            return true;
+        }
+
+        @Override
+        public CompletionStage<Void> reconcile(ServerLevel level, CommitReceipt receipt) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> record(CommitReceipt receipt) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void close(ServerLevel level) {
+        }
+
+        @Override
+        public void discard() {
+        }
     }
 
     private static String incompatibility() {
