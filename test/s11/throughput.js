@@ -17,8 +17,23 @@ const WIDE = [5296, 80, 5056, 5327, 99, 5087]
 const TOGGLED = [5376, 80, 4992, 5383, 81, 4999]
 const TOGGLE = [5390, 90, 5006]
 const READ_BACK = [5385, 80, 5085]
-// 64 cells of one chunk with neighbour updates on: the one-cell route, one unit per cell.
+// 64 cells of one chunk with neighbour updates on: one unit, its callbacks after its writes.
 const ONE_CELL = [5328, 80, 5056, 5335, 80, 5063]
+// Above SET16: 16 chunks with neighbour updates on, then undone.
+const NEIGHBORS16 = [5296, 90, 4992, 5359, 91, 5055]
+// Stone with two enclosed water sources; each loses the two wall cells east of it, one edit with
+// neighbour updates on and one with them off.
+const WALLS = 'fill 5344 80 5072 5355 82 5083 minecraft:stone'
+const WATER_ON = [5346, 81, 5074]
+const WATER_OFF = [5346, 81, 5080]
+const OPENED_ON = [5347, 81, 5074, 5348, 81, 5074]
+const OPENED_OFF = [5347, 81, 5080, 5348, 81, 5080]
+// A stone pool; water is set along one edge of its floor with updates on.
+const POOL = ['fill 5360 80 5072 5371 82 5083 minecraft:stone', 'fill 5361 80 5073 5370 81 5082 minecraft:air']
+const POURED = [5361, 80, 5073, 5362, 80, 5073]
+// A 16-chunk layer whose cell TARGET_TOGGLE is flipped every tick while the layer is set.
+const TARGET16 = [5296, 95, 4992, 5359, 95, 5055]
+const TARGET_TOGGLE = [5300, 95, 5000]
 
 const chunksOf = ([x1, , z1, x2, , z2]) => {
   const out = new Set()
@@ -33,6 +48,9 @@ module.exports = ({ rig, check, paced }) => {
     { name: 'large', box: LARGE, expect: () => 'minecraft:glass' },
     { name: 'wide', box: WIDE, expect: () => 'minecraft:oak_planks' },
     { name: 'one-cell', box: ONE_CELL, expect: () => 'minecraft:stone' },
+    { name: 'neighbors16-undone', box: NEIGHBORS16, expect: () => undefined },
+    { name: 'toggled-target', box: TARGET16, expect: (x, y, z) => x === TARGET_TOGGLE[0] && z === TARGET_TOGGLE[2]
+      ? ['minecraft:stone', 'minecraft:glass'] : 'minecraft:oak_planks' },
     { name: 'toggled', box: TOGGLED, expect: () => 'minecraft:glowstone' },
     { name: 'read-back', box: [...READ_BACK, ...READ_BACK], expect: () => 'minecraft:diamond_block' }
   ]
@@ -68,12 +86,19 @@ module.exports = ({ rig, check, paced }) => {
     return { finished: units, finishMeanMs: mean('finishNanos'), historyMeanMs: mean('historyNanos'),
       maintenanceMeanMs: mean('maintenanceNanos'), maxFinishMs: after.maxFinishNanos / 1e6 }
   }
-  // FAWE replies before the session flushes, so wait for the units themselves.
-  const settled = async (send, client, since, box, units) => {
-    await rig.wait(`${units} units in ${box.join(',')}`, async () =>
+  // Waits for the units themselves; with `lenient`, a shortfall is left to the check.
+  const settled = async (send, client, since, box, units, lenient) => {
+    const waiting = rig.wait(`${units} units in ${box.join(',')}`, async () =>
       (await publications(send, since, box)).units >= units, 60000, [client.entry])
+    await (lenient ? waiting.catch(() => {}) : waiting)
     return publications(send, since, box)
   }
+  const passTicks = async (send, client, count) => {
+    const until = (await now(send)) + count
+    await rig.wait(`${count} ticks`, async () => (await now(send)) >= until, 20000, [client.entry])
+  }
+  const holds = async (send, [x, y, z], block) =>
+    (await send(`execute if block ${x} ${y} ${z} minecraft:${block}`)) === 'Test passed'
 
   return {
     async contract (rig, send, name, { client, chatCommand: sendChatCommand }) {
@@ -134,18 +159,60 @@ module.exports = ({ rig, check, paced }) => {
         afterWide.idleWithPending === timing.idleWithPending && wide.outcomes.join() === 'COMPLETE',
       { ...wide, own: undefined, idle: afterWide.idleWithPending - timing.idleWithPending, ...lags(timing, afterWide) })
 
-      // Neighbour updates on: each cell is its own unit, submitted once the previous one finished.
+      // Neighbour updates on: one unit per chunk as without them, the callbacks after its writes.
       await chatCommand('/perf neighbors on', /set to|is already/)
       await select(...ONE_CELL)
       since = await now(send)
       timing = await probe(send, 'timing')
       await chatCommand('/set stone', /Operation completed/)
-      const oneCell = await settled(send, client, since, ONE_CELL, 64)
+      const oneCell = await settled(send, client, since, ONE_CELL, 1)
       const afterOneCell = await probe(send, 'timing')
+      check('neighbors-one-unit', oneCell.units === 1 && oneCell.applied === 64 && oneCell.outcomes.join() === 'COMPLETE',
+        { ...oneCell, own: undefined, ...lags(timing, afterOneCell) })
+      await select(...NEIGHBORS16)
+      since = await now(send)
+      await chatCommand('/set glass', /Operation completed/)
+      const neighbors16 = await settled(send, client, since, NEIGHBORS16, 16)
+      check('neighbors16-consecutive', neighbors16.units === 16 && neighbors16.applied === cellCount(NEIGHBORS16) &&
+        neighbors16.consecutive && neighbors16.outcomes.join() === 'COMPLETE', { ...neighbors16, own: undefined })
+      since = await now(send)
+      await chatCommand('undo', /Undid/)
+      const neighbors16Undo = await settled(send, client, since, NEIGHBORS16, 16)
+      check('neighbors16-undo-consecutive', neighbors16Undo.units === 16 && neighbors16Undo.consecutive &&
+        neighbors16Undo.applied === cellCount(NEIGHBORS16), { ...neighbors16Undo, own: undefined })
+
+      // Water learns of a removed wall only through a neighbour update.
+      await send(WALLS)
+      await send(`setblock ${WATER_ON.join(' ')} minecraft:water`)
+      await send(`setblock ${WATER_OFF.join(' ')} minecraft:water`)
+      await select(...OPENED_ON)
+      await chatCommand('/set air', /Operation completed/)
       await chatCommand('/perf neighbors off', /set to|is already/)
-      const span = oneCell.ticks.length ? oneCell.ticks[1] - oneCell.ticks[0] + 1 : 0
-      check('one-cell-route', oneCell.units === 64 && oneCell.applied === 64 && oneCell.outcomes.join() === 'COMPLETE',
-        { ...oneCell, own: undefined, span, cellsPerSecond: span ? 64 / span * 20 : 0, ...lags(timing, afterOneCell) })
+      await select(...OPENED_OFF)
+      await chatCommand('/set air', /Operation completed/)
+      await passTicks(send, client, 40)
+      check('neighbors-wake-water', await holds(send, OPENED_ON.slice(3), 'water'), {})
+      check('no-neighbors-water-stays', await holds(send, OPENED_OFF.slice(0, 3), 'air'), {})
+
+      // Water set with updates on schedules its own flow, from every cell of the unit.
+      for (const command of POOL) await send(command)
+      await chatCommand('/perf update on', /set to|is already/)
+      await select(...POURED)
+      await chatCommand('/set water', /Operation completed/)
+      await chatCommand('/perf update off', /set to|is already/)
+      await passTicks(send, client, 40)
+      check('update-water-flows', await holds(send, [POURED[3] + 2, POURED[4], POURED[5]], 'water') &&
+        await holds(send, [POURED[0], POURED[1], POURED[2] + 2], 'water'), {})
+
+      // A target cell flipped every tick: overwritten as found, never a conflict.
+      await probe(send, `toggle ${TARGET_TOGGLE.join(' ')}`)
+      await select(...TARGET16)
+      since = await now(send)
+      await client.send({ action: 'command', command: '/set oak_planks' })
+      const target16 = await settled(send, client, since, TARGET16, 16, true)
+      await probe(send, 'toggle off')
+      check('toggled-target-no-conflict', target16.units === 16 && target16.applied === cellCount(TARGET16) &&
+        target16.outcomes.join() === 'COMPLETE', { ...target16, own: undefined })
 
       // A block changing every tick elsewhere in the chunk is not a conflict.
       await probe(send, `toggle ${TOGGLE.join(' ')}`)
