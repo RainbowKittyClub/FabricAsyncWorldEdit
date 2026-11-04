@@ -137,9 +137,30 @@ public class FabricPlayer extends AbstractPlayerActor {
         return TextUtils.getLocaleByMinecraftTag(this.player.clientInformation().language());
     }
 
+    // While a command runs, its message waits for the writes made so far; a failed flush is thrown
+    // in the message's place.
+    private void awaitPendingWrites() {
+        var request = com.sk89q.worldedit.session.request.Request.current();
+        if (request == null || !request.repliesAwaitEdit() || player.level().getServer().isSameThread()) {
+            return;
+        }
+        var editSession = request.getEditSession();
+        if (editSession == null) {
+            return;
+        }
+        // The flush may report skipped cells to this player; those go out at once.
+        request.setRepliesAwaitEdit(false);
+        try {
+            editSession.flushWrites();
+        } finally {
+            request.setRepliesAwaitEdit(true);
+        }
+    }
+
     @Override
     @Deprecated
     public void printRaw(String msg) {
+        awaitPendingWrites();
         for (String part : msg.split("\n")) {
             this.player.sendSystemMessage(
                 net.minecraft.network.chat.Component.literal(part)
@@ -167,6 +188,7 @@ public class FabricPlayer extends AbstractPlayerActor {
 
     @Override
     public void print(Component component) {
+        awaitPendingWrites();
         this.player.sendSystemMessage(ComponentConverter.Serializer.fromJson(
             GsonComponentSerializer.INSTANCE.serialize(WorldEditText.format(component, getLocale())),
             player.level().registryAccess()
@@ -178,6 +200,7 @@ public class FabricPlayer extends AbstractPlayerActor {
     }
 
     private void sendColorized(String msg, ChatFormatting formatting) {
+        awaitPendingWrites();
         for (String part : msg.split("\n")) {
             MutableComponent component = net.minecraft.network.chat.Component.literal(part)
                 .withStyle(style -> style.withColor(formatting));

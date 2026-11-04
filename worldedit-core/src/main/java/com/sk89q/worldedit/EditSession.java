@@ -1330,6 +1330,16 @@ public class EditSession extends PassthroughExtent implements AutoCloseable {
     //FAWE start
 
     /**
+     * Publish a native world's writes made so far and wait for them, leaving the session open;
+     * a failure among them is thrown here.
+     */
+    public void flushWrites() {
+        if (wnaMode) {
+            getWorld().flush();
+        }
+    }
+
+    /**
      * Finish off the queue.
      */
     public void flushQueue() {

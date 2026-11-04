@@ -734,6 +734,9 @@ public final class PlatformCommandManager {
             // everything needs to be wrapped at least once. Which means to handle all WorldEdit
             // exceptions without writing a hook into every dispatcher, we need to unwrap these
             // exceptions and rethrow their converted form, if their is one.
+            //FAWE start - the command's messages wait for the writes they report on
+            Request.request().setRepliesAwaitEdit(true);
+            //FAWE end
             try {
                 Object result = task.get();
             } catch (Throwable t) {
@@ -745,6 +748,10 @@ public final class PlatformCommandManager {
                     next = next.getCause();
                 } while (next != null);
                 throw t;
+            } finally {
+                //FAWE start
+                Request.request().setRepliesAwaitEdit(false);
+                //FAWE end
             }
         } catch (ConditionFailedException e) {
             if (e.getCondition() instanceof PermissionCondition) {

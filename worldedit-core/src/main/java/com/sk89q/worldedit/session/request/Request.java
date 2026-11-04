@@ -54,6 +54,7 @@ public final class Request {
     private Extent extent;
     @Nullable
     private BooleanSupplier authority;
+    private boolean repliesAwaitEdit;
     //FAWE end
 
     private Request() {
@@ -123,6 +124,18 @@ public final class Request {
 
     public void setAuthority(@Nullable BooleanSupplier authority) {
         this.authority = authority;
+    }
+
+    /**
+     * Whether a message to a player waits for this request's edit to publish its writes: true while
+     * a command's body runs.
+     */
+    public boolean repliesAwaitEdit() {
+        return repliesAwaitEdit;
+    }
+
+    public void setRepliesAwaitEdit(boolean repliesAwaitEdit) {
+        this.repliesAwaitEdit = repliesAwaitEdit;
     }
 
     /**
