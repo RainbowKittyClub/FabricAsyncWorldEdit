@@ -177,6 +177,18 @@ async function main () {
         await sleep(1500)
         check('poi-follows-declared-side-effects', (await probe(send, 'poi 3284 80 3264')).poi === null &&
           (await probe(send, 'poi 3286 80 3264')).poi === 'minecraft:meeting', {})
+        // A hopper under stone settles as blocked; a section install turns the stone to air, and an item
+        // dropped there is still pulled in. (Not a tracker-invalidation test: it passes without it.)
+        await send('setblock 3290 79 3264 minecraft:hopper')
+        await send('setblock 3290 80 3264 minecraft:stone')
+        await sleep(2000)
+        await select(3290, 80, 3264, 3290, 80, 3264)
+        await chatCommand('fawe-coordinated set air', /Coordinated edit complete: 1 changes/)
+        await send('summon item 3290.5 80.2 3264.5 {Item:{id:"minecraft:diamond",count:1}}')
+        await rig.wait('hopper pulled the item', async () =>
+          /^Test passed/.test(await send('execute if data block 3290 79 3264 Items[0]')), 15000, [client.entry])
+        check('hopper-after-section-install', true, {})
+
         // Forced barrier: the light barrier is held while a unit sits published but not relit, in a chunk
         // nothing but FAWE's lease keeps loaded; a save runs meanwhile. Released, each milestone advances
         // once, every ticket is returned, and the light matches a vanilla control (after restart too).
