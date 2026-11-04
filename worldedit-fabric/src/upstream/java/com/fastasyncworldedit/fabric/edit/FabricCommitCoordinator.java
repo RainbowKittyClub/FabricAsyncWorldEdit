@@ -482,7 +482,11 @@ public final class FabricCommitCoordinator {
                     // proposal exactly matches the set that will be written; publication is
                     // non-yielding, so this equals the previous per-group re-check.
                     List<EditDelta> writeSet = new ArrayList<>();
-                    for (EditDelta delta : finalAuthorized) {
+                    // A native unit was authorized in this same non-yielding turn and holds no token.
+                    if (unit.nativeMutation) {
+                        writeSet.addAll(finalAuthorized);
+                    }
+                    for (EditDelta delta : unit.nativeMutation ? List.<EditDelta>of() : finalAuthorized) {
                         boolean stillAllowed = !proposal.context().cancellation().isCancelled()
                                 && FabricRegionCommands.authorized(proposal.context(), player);
                         for (EditIntegration.Reservation reservation : unit.reservations) {

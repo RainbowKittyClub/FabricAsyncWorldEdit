@@ -85,10 +85,47 @@ public final class OpacAuthorizer implements EditIntegration {
         return new Checks(context, List.of()).authorize(level, operator, context, delta);
     }
 
-    // Only detached context and coordinates survive preparation; no live policy is cached.
-    private record Checks(EditActorContext expected, List<ChunkPos> sensitiveReads) implements Reservation {
+    // One change's answer within one tick: OPAC decides by chunk, player and the block states.
+    private record Change(EditDelta.Kind kind, int chunkX, int chunkZ, String before, String after,
+            boolean beforeNbt, boolean afterNbt) { }
+
+    // Answers kept for the current server tick only, so no live policy outlives the turn it was read in.
+    private static final class Answers {
+        private final java.util.HashMap<Change, Boolean> byChange = new java.util.HashMap<>();
+        private int tick = -1;
+    }
+
+    // Only detached context and coordinates survive preparation; answers are cached per tick.
+    private record Checks(EditActorContext expected, List<ChunkPos> sensitiveReads, Answers answers)
+            implements Reservation {
+        private Checks(EditActorContext expected, List<ChunkPos> sensitiveReads) {
+            this(expected, sensitiveReads, new Answers());
+        }
+
         @Override
         public boolean authorize(ServerLevel level, ServerPlayer operator, EditActorContext context,
+                EditDelta actualDelta) {
+            if (actualDelta.kind() != EditDelta.Kind.BLOCK && actualDelta.kind() != EditDelta.Kind.BIOME) {
+                return decide(level, operator, context, actualDelta);
+            }
+            int tick = level.getServer().getTickCount();
+            if (answers.tick != tick) {
+                answers.byChange.clear();
+                answers.tick = tick;
+            }
+            var change = new Change(actualDelta.kind(), actualDelta.x() >> 4, actualDelta.z() >> 4,
+                    actualDelta.before().id(), actualDelta.after().id(),
+                    actualDelta.before().nbt() != null, actualDelta.after().nbt() != null);
+            Boolean known = answers.byChange.get(change);
+            if (known != null && !context.cancellation().isCancelled()) {
+                return known;
+            }
+            boolean answer = decide(level, operator, context, actualDelta);
+            answers.byChange.put(change, answer);
+            return answer;
+        }
+
+        private boolean decide(ServerLevel level, ServerPlayer operator, EditActorContext context,
                 EditDelta actualDelta) {
             if (!level.getServer().isSameThread()) {
                 throw new IllegalStateException("OPAC authorization requires the server thread");
