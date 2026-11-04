@@ -1,5 +1,6 @@
 package com.fastasyncworldedit.fabric.edit;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,6 +161,175 @@ public final class FabricEdits {
             operation.seal();
             throw failure;
         }
+    }
+
+    /** A cell of a native chunk unit; its before-value is read at snapshot. */
+    public record NativeCell(EditDelta.Kind kind, int x, int y, int z, EditValue target) { }
+
+    /**
+     * A submitted native chunk unit. Skipped cells may grow until completion, since a conflict
+     * re-snapshots; the completion holds each part's terminal receipt.
+     */
+    public record NativeUnit(List<UnsupportedBlockException> skipped, CompletionStage<List<CommitReceipt>> completion) { }
+
+    /** The coordinator is full; nothing of the unit was admitted, so it may be submitted again. */
+    public static final class NativeCapacityException extends java.util.concurrent.RejectedExecutionException {
+        public NativeCapacityException() {
+            super("Native commit admission is full");
+        }
+    }
+
+    private static final int NATIVE_CONFLICT_RETRIES = 2;
+    private static final int NATIVE_BLOCK_ENTITY_CELLS = 64;
+
+    /**
+     * Admit one chunk's native cells as one operation. Unsupported cells are skipped, parts keep at
+     * most 64 block-entity cells, and a part that conflicts before writing is re-snapshotted.
+     */
+    public NativeUnit submitNativeChunk(EditActorContext context, int chunkX, int chunkZ,
+            List<NativeCell> cells, Consumer<CommitReceipt> history) {
+        owner();
+        Objects.requireNonNull(context, "Native writes require an explicitly bound actor");
+        Objects.requireNonNull(history);
+        var chunk = new NativeChunk(context, access.level(context.dimension()), chunkX, chunkZ);
+        List<List<EditDelta>> parts = chunk.snapshot(cells);
+        if (parts.isEmpty()) {
+            return new NativeUnit(chunk.skipped, CompletableFuture.completedFuture(List.of()));
+        }
+        // All parts or none: a full coordinator is backpressure the caller retries, never a partial unit.
+        // PreparedChunkEdit's own accounting: each delta, plus its before-value as a read dependency.
+        long bytes = parts.stream().mapToLong(part -> 256L + part.size() * 144L + part.stream()
+                .mapToLong(delta -> delta.estimatedBytes() + delta.before().estimatedBytes()).sum()).sum();
+        if (!coordinator.hasRoom(parts.size(), bytes)) {
+            throw new NativeCapacityException();
+        }
+        chunk.operation = coordinator.admit(context, receipt -> {
+            history.accept(receipt);
+            return CompletableFuture.completedFuture(null);
+        });
+        try {
+            chunk.submit(parts, 0);
+        } catch (Throwable failure) {
+            chunk.operation.seal();
+            throw failure;
+        }
+        return new NativeUnit(chunk.skipped, chunk.done.minimalCompletionStage());
+    }
+
+    // One native chunk unit's parts, their retries and its operation; owner thread only.
+    private final class NativeChunk {
+        private final EditActorContext context;
+        private final net.minecraft.server.level.ServerLevel level;
+        private final int chunkX;
+        private final int chunkZ;
+        private final List<UnsupportedBlockException> skipped = java.util.Collections.synchronizedList(new ArrayList<>());
+        private final List<CommitReceipt> receipts = new ArrayList<>();
+        private final CompletableFuture<List<CommitReceipt>> done = new CompletableFuture<>();
+        private FabricCommitCoordinator.Operation operation;
+        private int outstanding;
+        private Throwable failure;
+
+        private NativeChunk(EditActorContext context, net.minecraft.server.level.ServerLevel level, int chunkX, int chunkZ) {
+            this.context = context;
+            this.level = level;
+            this.chunkX = chunkX;
+            this.chunkZ = chunkZ;
+        }
+
+        // Read every before-value now; sensitive block-entity data is authorized once per chunk.
+        private List<List<EditDelta>> snapshot(List<NativeCell> cells) {
+            var chunk = access.loadedChunk(level, chunkX, chunkZ);
+            for (NativeCell cell : cells) {
+                if (cell.kind() == EditDelta.Kind.BLOCK && chunk.getBlockEntity(
+                        new net.minecraft.core.BlockPos(cell.x(), cell.y(), cell.z())) != null) {
+                    com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, chunkX, chunkZ);
+                    break;
+                }
+            }
+            List<List<EditDelta>> parts = new ArrayList<>();
+            List<EditDelta> part = new ArrayList<>();
+            int heavy = 0;
+            for (NativeCell cell : cells) {
+                EditValue before = access.read(level, cell.kind(), cell.x(), cell.y(), cell.z(), "");
+                EditValue target = cell.target();
+                if (cell.kind() == EditDelta.Kind.BLOCK && target.nbt() == null && before.nbt() != null
+                        && mapping.nativeState(before.id()).getBlock() == mapping.nativeState(target.id()).getBlock()) {
+                    target = new EditValue(target.id(), before.nbt());
+                }
+                EditDelta delta = new EditDelta(cell.kind(), cell.x(), cell.y(), cell.z(), "", before, target);
+                UnsupportedBlockException unsupported = access.unsupported(delta);
+                if (unsupported != null) {
+                    skipped.add(unsupported);
+                    continue;
+                }
+                boolean blockEntity = access.blockEntityCell(delta);
+                if (blockEntity && heavy == NATIVE_BLOCK_ENTITY_CELLS) {
+                    parts.add(part);
+                    part = new ArrayList<>();
+                    heavy = 0;
+                }
+                part.add(delta);
+                if (blockEntity) heavy++;
+            }
+            if (!part.isEmpty()) parts.add(part);
+            EditCoverage.reached(true, context.source(), "snapshot");
+            return parts;
+        }
+
+        private void submit(List<List<EditDelta>> parts, int attempt) {
+            long revision = ((ChunkRevision) access.loadedChunk(level, chunkX, chunkZ)).worldedit$editRevision();
+            for (List<EditDelta> part : parts) {
+                // Values only are matched for native units; the revision stays for sensitive-read checks.
+                List<PreparedChunkEdit.ReadDependency> reads = part.stream()
+                        .map(delta -> new PreparedChunkEdit.ReadDependency(delta.kind(), delta.x(), delta.y(),
+                                delta.z(), "", delta.before(), revision)).toList();
+                var proposal = new PreparedChunkEdit(context, chunkX, chunkZ, mapping.generation(), reads, part);
+                CompletionStage<CommitReceipt> completion = coordinator.submitNative(proposal);
+                outstanding++;
+                completion.whenComplete((receipt, problem) -> {
+                    if (server.isSameThread()) settle(part, attempt, receipt, problem);
+                    else server.execute(() -> settle(part, attempt, receipt, problem));
+                });
+            }
+        }
+
+        private void settle(List<EditDelta> part, int attempt, CommitReceipt receipt, Throwable problem) {
+            outstanding--;
+            if (problem != null) {
+                if (failure == null) failure = problem;
+                else failure.addSuppressed(problem);
+            } else if (receipt.outcome() == CommitReceipt.Outcome.CONFLICT && receipt.applied().isEmpty()
+                    && attempt < NATIVE_CONFLICT_RETRIES && !context.cancellation().isCancelled() && !stopped) {
+                repreparations++;
+                try {
+                    submit(snapshot(part.stream().map(delta -> new NativeCell(delta.kind(), delta.x(), delta.y(),
+                            delta.z(), delta.after())).toList()), attempt + 1);
+                } catch (Throwable resubmission) {
+                    if (failure == null) failure = resubmission;
+                    else failure.addSuppressed(resubmission);
+                }
+            } else {
+                receipts.add(receipt);
+            }
+            if (outstanding == 0) {
+                operation.seal().whenComplete((unused, sealed) -> {
+                    Throwable terminal = failure != null ? failure : sealed;
+                    if (terminal != null) done.completeExceptionally(terminal);
+                    else done.complete(List.copyOf(receipts));
+                });
+            }
+        }
+    }
+
+    /** Heartbeats, idle heartbeats while units were pending, and publication time. */
+    public Map<String, Long> publicationTiming() {
+        owner();
+        return coordinator.timing();
+    }
+
+    /** The latest publications, oldest first. */
+    public List<FabricCommitCoordinator.Publication> publicationTimeline() {
+        return coordinator.timeline();
     }
 
     /** Legacy callbacks have unknown dependencies and are refused before snapshot exposure. */
