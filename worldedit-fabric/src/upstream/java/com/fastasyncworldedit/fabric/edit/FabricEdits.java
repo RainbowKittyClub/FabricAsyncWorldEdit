@@ -223,6 +223,7 @@ public final class FabricEdits {
         Map<String, Long> stats = new LinkedHashMap<>(access.statistics());
         stats.putAll(coordinator.milestones());
         stats.put("repreparations", repreparations);
+        stats.put("pending", (long) coordinator.pendingCount());
         return Map.copyOf(stats);
     }
 
