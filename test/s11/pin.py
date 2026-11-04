@@ -23,7 +23,7 @@ for key, suffix in [('candidate', 'dist'), ('lifecycle-probe', 'testmod')]:
     if len(jars) != 1:
         raise RuntimeError(f'Expected one {suffix} jar: {jars}')
     deps[key] = pin(jars[0])
-for suite in ('functional', 'operations', 'content'):
+for suite in ('functional', 'operations', 'content', 'throughput'):
     manifest['profiles'][f'{suite}-base'] = ['candidate', 'fabric-api', 'lifecycle-probe']
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))

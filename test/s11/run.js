@@ -13,7 +13,7 @@ const manifestFile = path.join(__dirname, 'manifest.json')
 const manifest = JSON.parse(fs.readFileSync(manifestFile))
 const evidence = '/mnt/WORKSPACE/scratchpad/fawe-s11-evidence'
 const [suite, base] = process.argv.slice(2)
-const SUITES = { functional: './functional', operations: './operations', content: './content' }
+const SUITES = { functional: './functional', operations: './operations', content: './content', throughput: './throughput' }
 if (!SUITES[suite]) throw new Error(`Unknown S11 suite ${suite}`)
 const profile = `${suite}-${base}`
 if (!manifest.profiles[profile]) throw new Error(`Unknown S11 profile ${profile}`)

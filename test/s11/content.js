@@ -177,7 +177,10 @@ module.exports = ({ rig, check, paced }) => {
       // Every cell's receipt names the dimension it was written in, and nothing is left pending.
       const tallReceipts = JSON.parse(await send('fawes10 receipts')).receipts
       const statistics = await probe(send, 'statistics')
-      check('tall-receipts-in-tall', tallReceipts.length === 16 && tallReceipts.every(receipt => receipt.dimension === TALL),
+      // Two edits of one chunk each: two units, eight cells apiece.
+      check('tall-receipts-in-tall', tallReceipts.length === 2 &&
+        tallReceipts.reduce((sum, receipt) => sum + receipt.applied, 0) === 16 &&
+        tallReceipts.every(receipt => receipt.dimension === TALL),
         { dimensions: [...new Set(tallReceipts.map(receipt => receipt.dimension))], count: tallReceipts.length,
           overworld: (await probe(send, 'dump 0 -64 0 1 -63 1')).runs, overworldTop: (await probe(send, 'dump 0 318 0 1 319 1')).runs })
       check('tall-nothing-pending', statistics.pending === 0, statistics)

@@ -12,7 +12,10 @@ const BULK_STAGES = ['ticket', ...NATIVE_STAGES]
 const ROUTES = [['native', 'PLAYER'], ['native', 'API'], ['bulk', 'PLAYER'], ['bulk', 'API']]
 const AREA = 'forceload add 5000 5000 5063 5007'
 const NEGATIVE = 'forceload add -5024 -5024 -4992 -4992'
-const REVOKE = [5000, 80, 5006, 5015, 81, 5007]
+// One cell wide across 64 chunks: one unit each, so losing permission part-way leaves whole units.
+const REVOKE = [5000, 80, 3968, 5000, 80, 4991]
+const REVOKE_AREA = 'forceload add 5000 3968 5000 4991'
+const applied = receipts => receipts.reduce((sum, receipt) => sum + receipt.applied, 0)
 
 // Each case: a box and the state every cell must hold, or the states it may hold.
 const CASES = [
@@ -64,6 +67,7 @@ module.exports = ({ rig, check, paced }) => {
       const tp = (x, y, z) => send(`tp ${name} ${x + 0.5} ${y} ${z + 0.5}`)
       await send(AREA)
       await send(NEGATIVE)
+      await send(REVOKE_AREA)
       await send('fill 4996 79 4996 5067 79 5011 minecraft:stone')
       await send('fill 4996 80 4996 5067 84 5011 minecraft:air')
       await send('fill -5014 79 -5014 -5002 79 -4998 minecraft:stone')
@@ -89,7 +93,9 @@ module.exports = ({ rig, check, paced }) => {
       await chatCommand('/set stone', /Operation completed/)
       routed('fill', delta(before, await probe(send, 'coverage')), 'native', 'PLAYER', NATIVE_STAGES)
       const own = (await receipts(send)).receipts
-      check('fill-attributed-player', own.length === 16 && own.every(receipt => receipt.source === 'PLAYER'), own.slice(0, 3))
+      // One chunk: one unit holding all 16 cells.
+      check('fill-attributed-player', own.length === 1 && applied(own) === 16 && own.every(receipt => receipt.source === 'PLAYER'),
+        own.slice(0, 3))
 
       await select(5006, 80, 5000, 5009, 80, 5001)
       await chatCommand('/replace dirt stone', /blocks have been replaced/)
@@ -141,7 +147,8 @@ module.exports = ({ rig, check, paced }) => {
       check('api-native-result', !apiResult.error && apiResult.changed === 8, apiResult)
       routed('api-native', delta(before, await probe(send, 'coverage')), 'native', 'API', NATIVE_STAGES)
       const apiReceipts = (await receipts(send)).receipts
-      check('api-native-attributed-api', apiReceipts.length === 8 && apiReceipts.every(receipt => receipt.source === 'API'),
+      check('api-native-attributed-api', apiReceipts.length === 1 && applied(apiReceipts) === 8 &&
+        apiReceipts.every(receipt => receipt.source === 'API'),
         apiReceipts.slice(0, 3))
 
       before = await probe(send, 'coverage')
@@ -173,7 +180,7 @@ module.exports = ({ rig, check, paced }) => {
         return settled
       }, 30000, [client.entry])
       revoked = last
-      check('revoked-partial', revoked > 0 && revoked < 64, { revoked })
+      check('revoked-partial', revoked > 0 && revoked < 1024 && revoked % 16 === 0, { revoked })
       // The refusal can reach the client log just after the count settles; wait up to 10 s.
       let reported = false
       for (const end = Date.now() + 10000; !reported && Date.now() < end;) {
@@ -198,6 +205,7 @@ module.exports = ({ rig, check, paced }) => {
       const chatCommand = paced(send, client, sendChatCommand)
       await send(AREA)
       await send(NEGATIVE)
+      await send(REVOKE_AREA)
       await verifyAll(send, '-after-restart')
       check('revoked-after-restart', await count(send, REVOKE, 'stripped_oak_log') === revoked, { revoked })
       await chatCommand('/undo', /Undid/)

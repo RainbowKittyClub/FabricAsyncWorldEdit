@@ -48,6 +48,15 @@ public final class S11Probe implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.START_SERVER_TICK.register(server -> {
+            BlockPos toggle = TOGGLE;
+            if (toggle != null) {
+                var level = server.overworld();
+                level.setBlock(toggle, level.getBlockState(toggle).is(net.minecraft.world.level.block.Blocks.STONE)
+                        ? net.minecraft.world.level.block.Blocks.GLASS.defaultBlockState()
+                        : net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 2);
+            }
+        });
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
                 Commands.literal("fawes11").then(Commands.argument("arguments", StringArgumentType.greedyString())
                         .executes(command -> {
@@ -103,6 +112,34 @@ public final class S11Probe implements ModInitializer {
                     answer.put("region", "incomplete");
                 }
                 return GSON.toJson(answer);
+            }
+            case "timing" -> {
+                return GSON.toJson(FabricEdits.nativeService(server).publicationTiming());
+            }
+            // timeline since: publications after that server tick, oldest first.
+            case "timeline" -> {
+                int since = Integer.parseInt(words[1]);
+                return GSON.toJson(Map.of("tick", server.getTickCount(), "publications",
+                        FabricEdits.nativeService(server).publicationTimeline().stream()
+                                .filter(publication -> publication.tick() > since).toList()));
+            }
+            // toggle x y z | toggle off: flip one block every tick, before the coordinator's heartbeat.
+            case "toggle" -> {
+                TOGGLE = words[1].equals("off") ? null
+                        : new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+                return GSON.toJson(Map.of("toggle", String.valueOf(TOGGLE)));
+            }
+            // ryw player x y z: an API session reads its own write before it is flushed.
+            case "ryw" -> {
+                ServerPlayer player = server.getPlayerList().getPlayerByName(words[1]);
+                if (player == null) throw new IllegalArgumentException("No such player " + words[1]);
+                var position = BlockVector3.at(Integer.parseInt(words[2]), Integer.parseInt(words[3]),
+                        Integer.parseInt(words[4]));
+                String id = UUID.randomUUID().toString();
+                Map<String, Object> result = new ConcurrentHashMap<>(Map.of("done", false));
+                RESULTS.put(id, result);
+                API_THREAD.execute(() -> readYourWrites(server, player, position, result));
+                return GSON.toJson(Map.of("id", id));
             }
             case "statistics" -> {
                 return GSON.toJson(FabricEdits.nativeService(server).publicationStatistics());
@@ -170,6 +207,31 @@ public final class S11Probe implements ModInitializer {
             result.put("done", true);
         }
     }
+
+    // One unflushed write: the session reads it back while the world still holds the old block.
+    private static void readYourWrites(MinecraftServer server, ServerPlayer player, BlockVector3 position,
+            Map<String, Object> result) {
+        try {
+            var world = FabricAdapter.adapt(server.overworld());
+            var pos = new BlockPos(position.x(), position.y(), position.z());
+            try (EditSession session = WorldEdit.getInstance().newEditSessionBuilder().world(world)
+                    .actor(FabricAdapter.adaptPlayer(player)).build()) {
+                session.setBlock(position, BlockTypes.DIAMOND_BLOCK.getDefaultState());
+                result.put("session", session.getBlock(position).getAsString());
+                result.put("sessionFull", session.getFullBlock(position).toImmutableState().getAsString());
+                result.put("world", server.submit(() -> FabricAdapter.adapt(server.overworld().getBlockState(pos))
+                        .getAsString()).join());
+            }
+            result.put("flushed", server.submit(() -> FabricAdapter.adapt(server.overworld().getBlockState(pos))
+                    .getAsString()).join());
+        } catch (Throwable failure) {
+            result.put("error", String.valueOf(failure));
+        } finally {
+            result.put("done", true);
+        }
+    }
+
+    private static volatile BlockPos TOGGLE;
 
     // FAWE's asynchronous coordinated API, submitted on the owner thread.
     private static void bulkEdit(MinecraftServer server, ServerPlayer player, BlockState block, int[] box,
