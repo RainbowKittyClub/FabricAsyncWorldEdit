@@ -102,8 +102,9 @@ public final class PublicationProbe implements ModInitializer {
     }
 
     public static boolean owns(PreparedChunkEdit proposal) {
+        // fawe-coordinated units; a player's native WorldEdit cell carries its session.
         return RUNS.containsKey(proposal.context().operationId())
-                || proposal.context().source() == EditActorContext.Source.PLAYER;
+                || proposal.context().source() == EditActorContext.Source.PLAYER && proposal.context().sessionId() == null;
     }
 
     public static CompletionStage<EditIntegration.Reservation> prepare(PreparedChunkEdit proposal) {
