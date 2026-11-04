@@ -42,7 +42,10 @@ public class FaweVersion {
         this.snapshot = split.length > 1 && split[1].toLowerCase(Locale.ROOT).contains("snapshot");
         int buildIndex = this.snapshot ? 2 : 1;
         this.build = split.length == buildIndex + 1 ? Integer.parseInt(split[buildIndex]) : 0;
-        this.hash = Integer.parseInt(commit.substring(commit.indexOf('=') + 1), 16);
+        // The build writes "-<abbreviated hash>"; git lengthens it to 8 digits when 7 are ambiguous,
+        // and 8 digits from 0x80000000 up overflow a signed int, so read them unsigned.
+        String hex = commit.substring(commit.indexOf('=') + 1).replaceFirst("^-", "");
+        this.hash = hex.isEmpty() ? 0 : Integer.parseUnsignedInt(hex.substring(0, Math.min(8, hex.length())), 16);
         String[] split2 = date.substring(date.indexOf('=') + 1).split("\\.");
         this.year = Integer.parseInt(split2[0]);
         this.month = Integer.parseInt(split2[1]);
