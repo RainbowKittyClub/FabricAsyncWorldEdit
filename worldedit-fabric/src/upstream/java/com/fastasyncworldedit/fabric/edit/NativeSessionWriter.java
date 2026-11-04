@@ -28,8 +28,8 @@ import net.minecraft.server.MinecraftServer;
 /**
  * A bound WorldEdit session's writes, committed one chunk per unit. Sealed units queue here; a
  * unit is admitted once its chunk has no unit in flight, so other chunks fill the heartbeats while
- * a chunk's earlier unit relights. The session reads its own pending writes before the world. Only
- * writes without cross-cell callbacks belong here.
+ * a chunk's earlier unit relights. The session reads its own pending writes before the world, as
+ * written: validation and callbacks apply when the unit publishes.
  */
 public final class NativeSessionWriter {
     private static final int UNIT_CELLS = 4096;
@@ -131,12 +131,6 @@ public final class NativeSessionWriter {
 
     public NativeSessionWriter(Host host) {
         this.host = host;
-    }
-
-    /** Whether writes with these side effects may share a unit: none has cross-cell callbacks. */
-    public static boolean batchable(SideEffectSet effects) {
-        return !effects.shouldApply(SideEffect.UPDATE) && !effects.shouldApply(SideEffect.NEIGHBORS)
-                && !effects.shouldApply(SideEffect.VALIDATION);
     }
 
     /**

@@ -360,8 +360,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         // defaults; the session's own side effects (//perf) were bound with its actor.
         SideEffectSet sideEffects = requested == SideEffectSet.defaults() && editContext != null
                 ? editContext.sideEffects() : requested;
-        if (writer != null && com.fastasyncworldedit.fabric.edit.NativeSessionWriter.batchable(sideEffects)) {
-            // Published with its chunk's unit; FAWE counts calls as changes either way.
+        if (writer != null) {
+            // Published with its chunk's unit; FAWE counts calls as changes either way. Validation
+            // and callbacks run at publication.
             BaseBlock target = block.toBaseBlock();
             // An unsupported target is known now; an unsupported block it replaces, only at snapshot.
             if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(target.getBlockType().id())) {
@@ -373,16 +374,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                     sideEffects);
             return true;
         }
-        return nativeWrite(EditDelta.Kind.BLOCK, position,
-                sideEffects.with(SideEffect.VALIDATION, SideEffect.State.OFF), () -> {
-                    BaseBlock target = block.toBaseBlock();
-                    if (sideEffects.shouldApply(SideEffect.VALIDATION)) {
-                        BlockState validated = FabricAdapter.adapt(worldNativeAccess.getValidBlockForPosition(
-                                FabricAdapter.adapt(target.toImmutableState()), FabricAdapter.toBlockPos(position)));
-                        target = validated.toBaseBlock(target.getNbtReference());
-                    }
-                    return editValue(target);
-                });
+        return nativeWrite(EditDelta.Kind.BLOCK, position, sideEffects, () -> editValue(block.toBaseBlock()));
     }
 
     private static EditValue editValue(BaseBlock block) {
@@ -914,8 +906,6 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         if (editContext == null) {
             throw new UnsupportedOperationException("Native edits require a bound current actor");
         }
-        // Cross-cell callbacks may read any cell, so every earlier write is published first.
-        writer.drain();
         EditActorContext unit = unitContext(effects);
         // A player's command or tool is asked again at this cell's publication, like fawe-coordinated.
         if (authority != null) {
