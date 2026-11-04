@@ -19,8 +19,8 @@
   "minecraft": {
     "version": "26.3",
     "metadata": {
-      "path": "/home/kgadberry/.gradle/caches/fabric-loom/26.3/mojang_minecraft_info.json",
-      "sha256": "7755c56601d666849aad5b4266503cacc17dac1b747018fccd5a19201b3dda82",
+      "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/test/references/mojang-26.3-version.json",
+      "sha256": "15c38c58047fd327ed2ad8475c470df54112faa37b7db77c1b1f73ec84474278",
       "bytes": 44992
     },
     "client": {

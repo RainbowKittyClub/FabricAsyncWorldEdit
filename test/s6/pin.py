@@ -21,6 +21,8 @@ for key, suffix in [('candidate', 'dist'), ('s6-probe', 's6probe'), ('lifecycle-
         'sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'nested': nested}
 # Polymer installed: the candidate manifest's accepted Polymer bundle on the claims profile.
 candidate = json.loads((root / 'test/candidate-manifest.json').read_text())
+# The game inputs follow the S1 lock through the candidate manifest, as every other lane's do.
+manifest['minecraft'] = candidate['minecraft']
 manifest['availableDependencies']['polymer-accepted'] = candidate['availableDependencies']['polymer-accepted']
 manifest['profiles']['claims-polymer'] = manifest['profiles']['claims'] + ['polymer-accepted']
 manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles'] if name != 'polymer']
