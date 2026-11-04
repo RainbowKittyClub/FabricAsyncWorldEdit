@@ -436,19 +436,24 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
                     .world(world).actor(player).forceWNA().fastMode(false).checkMemory(false)
                     .changeSet(first).build()) {
                 var pos = BlockVector3.at(target.getX(), target.getY(), target.getZ());
+                // A session commits at its flush; each write is flushed before the next change.
                 session.setBlock(pos, BlockState.get("minecraft:gold_block"));
+                session.flushQueue();
                 int initial = first.size();
                 session.setChangeSet(null);
                 session.setBlock(pos, BlockState.get("minecraft:diamond_block"));
+                session.flushQueue();
                 int disabled = first.size();
                 session.setChangeSet(second);
                 session.setBlock(pos, BlockState.get("minecraft:dirt"));
+                session.flushQueue();
                 int reattached = second.size();
                 com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
                     claim(OTHER);
                     return null;
                 });
                 session.setBlock(pos, BlockState.get("minecraft:stone"));
+                session.flushQueue();
                 int denied = second.size();
                 Map<String, Object> facts = Map.of("case", "bound-native-history-toggle",
                         "initial", initial, "disabled", disabled, "oldFinal", first.size(),
@@ -470,11 +475,14 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
                 });
                 session.disableHistory();
                 session.setBlock(pos, BlockState.get("minecraft:gold_block"));
+                session.flushQueue();
                 if (second.size() != 1) throw new AssertionError("disableHistory kept a recorder attached");
                 session.enableHistory(second);
                 session.setBlock(pos, BlockState.get("minecraft:dirt"));
+                session.flushQueue();
                 com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> { claim(OTHER); return null; });
                 session.setBlock(pos, BlockState.get("minecraft:stone"));
+                session.flushQueue();
                 if (second.size() != 2) throw new AssertionError("enableHistory created speculative/duplicate history");
                 com.fastasyncworldedit.core.util.TaskManager.taskManager().sync(() -> {
                     results.add(Map.of("case", "bound-native-enable-history", "history", second.size(),
@@ -482,6 +490,23 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
                     claim(actor.getUUID());
                     return null;
                 });
+                // Unflushed writes keep the history attached when each was made.
+                var early = new com.fastasyncworldedit.core.history.MemoryOptimizedHistory(world);
+                var late = new com.fastasyncworldedit.core.history.MemoryOptimizedHistory(world);
+                try (var buffered = com.sk89q.worldedit.WorldEdit.getInstance().newEditSessionBuilder()
+                        .world(world).actor(player).forceWNA().fastMode(false).checkMemory(false)
+                        .changeSet(early).build()) {
+                    buffered.setBlock(pos.add(0, 1, 0), BlockState.get("minecraft:gold_block"));
+                    buffered.setChangeSet(null);
+                    buffered.setBlock(pos.add(0, 2, 0), BlockState.get("minecraft:diamond_block"));
+                    buffered.setChangeSet(late);
+                    buffered.setBlock(pos.add(0, 3, 0), BlockState.get("minecraft:dirt"));
+                }
+                if (early.size() != 1 || late.size() != 1) {
+                    throw new AssertionError("Unflushed writes lost their history: " + early.size() + "/" + late.size());
+                }
+                server.execute(() -> results.add(Map.of("case", "bound-native-history-unflushed",
+                        "early", early.size(), "late", late.size())));
                 var legacy = new ArrayListHistory();
                 legacy.add(new com.sk89q.worldedit.history.change.BlockChange(pos,
                         BlockState.get("minecraft:stone"), BlockState.get("minecraft:dirt")));
@@ -509,8 +534,9 @@ public final class ClaimsProbe implements ModInitializer, EditIntegration {
             if (problem != null) {
                 fail(problem);
             } else if (!level.getBlockState(target).is(Blocks.DIRT)
-                    || nativeReceipts.size() < 9
-                    || nativeReceipts.stream().mapToInt(r -> r.applied().size()).sum() != 7
+                    // Includes the unflushed-history case: three units, one write each.
+                    || nativeReceipts.size() < 12
+                    || nativeReceipts.stream().mapToInt(r -> r.applied().size()).sum() != 10
                     || nativeReceipts.stream().mapToInt(CommitReceipt::denied).sum() != 2) {
                 fail(new AssertionError("Native history fixture world/receipt mismatch"));
             }

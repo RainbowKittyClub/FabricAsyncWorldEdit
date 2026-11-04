@@ -190,7 +190,12 @@ module.exports = ({ rig, check, paced }) => {
       }
       check('revoked-reported', reported, { reported })
       await send(`op ${name}`)
-      const entry = JSON.parse(await send(`fawes10 history ${name}`)).entries.at(-1)
+      // FAWE reports the stop before its finally block flushes and remembers the session.
+      let entry
+      await rig.wait('revoked edit remembered', async () => {
+        entry = JSON.parse(await send(`fawes10 history ${name}`)).entries.at(-1)
+        return entry && entry.size === revoked
+      }, 10000, [client.entry]).catch(() => {})
       check('revoked-history-exact', entry && entry.size === revoked, entry)
 
       await verifyAll(send, '')

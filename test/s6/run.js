@@ -87,7 +87,8 @@ async function main () {
             return historyState.done
           }, 30000, [client.entry])
           writeJson(path.join(rig.root, 's6-native-history.json'), historyState)
-          if (historyState.failure || historyState.results.length !== 10) {
+          // Ten cases plus the unflushed-history case.
+          if (historyState.failure || historyState.results.length !== 11) {
             throw new GateError(`Dynamic history/native refusals failed: ${JSON.stringify(historyState)}`)
           }
           await expected(3202, 80, 3200, 'minecraft:dirt')
