@@ -189,6 +189,8 @@ module.exports = ({ rig, check, paced }) => {
         await new Promise(resolve => setTimeout(resolve, 250))
       }
       check('final-flush-reported', /Stopped: the player disconnected or no longer has permission/.test(finalChat), {})
+      // The stop replaces the reply; nothing claims the edit completed.
+      check('final-flush-no-completion', !/Operation completed/.test(finalChat), {})
       await send(`op ${name}`)
       let finalHistory
       await rig.wait('final-flush edit remembered', async () => {

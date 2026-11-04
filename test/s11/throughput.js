@@ -92,13 +92,13 @@ module.exports = ({ rig, check, paced }) => {
       let since = await now(send)
       let timing = await probe(send, 'timing')
       await chatCommand('/set stone', /Operation completed/)
-      // The tick the reply was seen, against the units' own ticks.
+      // The reply waits for the edit: no unit publishes after the tick it was seen.
       const replied = await now(send)
       const set = await settled(send, client, since, SET16, 16)
       const afterSet = await probe(send, 'timing')
       const idle = afterSet.idleWithPending - timing.idleWithPending
-      check('set16-reply-lead', true,
-        { replied, ticks: set.ticks, unitsAfterReply: set.own.filter(entry => entry.tick > replied).length })
+      const unitsAfterReply = set.own.filter(entry => entry.tick > replied).length
+      check('set16-reply-after-units', unitsAfterReply === 0, { replied, ticks: set.ticks, unitsAfterReply })
       check('set16-units', set.units === 16 && set.applied === cellCount(SET16) && set.outcomes.join() === 'COMPLETE',
         { ...set, own: undefined })
       check('set16-consecutive', set.consecutive && idle === 0, { ticks: set.ticks, idle, ...lags(timing, afterSet) })
