@@ -192,6 +192,71 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             ? serverLevelData.getLevelName()
             : "world";
         this.worldNativeAccess = new FabricWorldNativeAccess(worldRef);
+        this.writer = context == null ? null : new com.fastasyncworldedit.fabric.edit.NativeSessionWriter(new WriterHost());
+    }
+
+    // A bound session's batched writes, one chunk per unit; null for an unbound world.
+    private final com.fastasyncworldedit.fabric.edit.NativeSessionWriter writer;
+
+    private final class WriterHost implements com.fastasyncworldedit.fabric.edit.NativeSessionWriter.Host {
+        @Override
+        public MinecraftServer server() {
+            return getWorld().getServer();
+        }
+
+        @Override
+        public EditActorContext unitContext(SideEffectSet effects) {
+            return FabricWorld.this.unitContext(effects);
+        }
+
+        @Override
+        public void authorize(UUID operation) {
+            if (authority != null) {
+                com.fastasyncworldedit.fabric.edit.FabricRegionCommands.authorizeWith(operation, authority);
+            }
+        }
+
+        @Override
+        public void forget(UUID operation) {
+            if (authority != null) {
+                com.fastasyncworldedit.fabric.edit.FabricRegionCommands.forgetAuthority(operation);
+            }
+        }
+
+        @Override
+        public java.util.function.Consumer<CommitReceipt> history() {
+            return nativeHistory;
+        }
+
+        @Override
+        public void cancel() {
+            editContext.cancellation().cancel();
+        }
+
+        @Override
+        public RuntimeException stop(Throwable failure) {
+            return stopped(failure);
+        }
+    }
+
+    // Each unit is its own operation within the session; a replay keeps its original parent.
+    private EditActorContext unitContext(SideEffectSet effects) {
+        boolean replay = editContext.source() == EditActorContext.Source.UNDO
+                || editContext.source() == EditActorContext.Source.REDO;
+        return new EditActorContext(editContext.actorId(), editContext.actorName(),
+                editContext.source(), java.util.UUID.randomUUID(),
+                replay ? editContext.parentId() : editContext.operationId(), editContext.originalActorId(),
+                editContext.dimension(), effects, editContext.cancellation().child(), editContext.operationId());
+    }
+
+    // The exception a session's caller sees: an expected stop as a FAWE cancellation, else the failure.
+    private static RuntimeException stopped(Throwable failure) {
+        if (operatorRefused(failure)) {
+            return new com.fastasyncworldedit.core.internal.exception.FaweException("Stopped: the player"
+                    + " disconnected or no longer has permission for this edit; changes made before this"
+                    + " point are kept and can be undone");
+        }
+        return failure instanceof RuntimeException runtime ? runtime : new RuntimeException(failure);
     }
 
     /**
@@ -295,6 +360,13 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         // defaults; the session's own side effects (//perf) were bound with its actor.
         SideEffectSet sideEffects = requested == SideEffectSet.defaults() && editContext != null
                 ? editContext.sideEffects() : requested;
+        if (writer != null && com.fastasyncworldedit.fabric.edit.NativeSessionWriter.batchable(sideEffects)) {
+            // Published with its chunk's unit; FAWE counts calls as changes either way.
+            BaseBlock target = block.toBaseBlock();
+            writer.write(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z(), editValue(target), target,
+                    sideEffects);
+            return true;
+        }
         return nativeWrite(EditDelta.Kind.BLOCK, position,
                 sideEffects.with(SideEffect.VALIDATION, SideEffect.State.OFF), () -> {
                     BaseBlock target = block.toBaseBlock();
@@ -303,9 +375,13 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                                 FabricAdapter.adapt(target.toImmutableState()), FabricAdapter.toBlockPos(position)));
                         target = validated.toBaseBlock(target.getNbtReference());
                     }
-                    return new EditValue(target.toImmutableState().getAsString(), target.getNbt() == null
-                            ? null : FrozenNbt.capture(NBTConverter.toNative(target.getNbt())));
+                    return editValue(target);
                 });
+    }
+
+    private static EditValue editValue(BaseBlock block) {
+        return new EditValue(block.toImmutableState().getAsString(), block.getNbt() == null
+                ? null : FrozenNbt.capture(NBTConverter.toNative(block.getNbt())));
     }
 
     @Override
@@ -323,6 +399,30 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public boolean clearContainerBlockContents(BlockVector3 position) {
         checkNotNull(position);
+        if (writer != null) {
+            BlockPos pos = FabricAdapter.toBlockPos(position);
+            var pending = writer.pending(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z());
+            EditValue before = pending != null ? pending.value()
+                    : com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () -> {
+                        NativeClaims.snapshot((ServerLevel) getWorld(), editContext, pos.getX() >> 4, pos.getZ() >> 4);
+                        return nativeValue(pos);
+                    });
+            if (before.nbt() == null) {
+                return false;
+            }
+            BlockState state = BlockState.get(before.id());
+            String id = state.getBlockType().id();
+            if (!Set.of("minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
+                    "minecraft:furnace").contains(id)) {
+                throw new UnsupportedOperationException("No verified native inventory codec for " + id);
+            }
+            var cleared = before.nbt().thaw();
+            cleared.remove("Items");
+            writer.write(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z(),
+                    new EditValue(before.id(), FrozenNbt.capture(cleared)),
+                    state.toBaseBlock(NBTConverter.fromNative(cleared)), SideEffectSet.none());
+            return true;
+        }
 
         return nativeWrite(EditDelta.Kind.BLOCK, position, SideEffectSet.none(), () -> {
             BlockPos pos = FabricAdapter.toBlockPos(position);
@@ -345,6 +445,11 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public BiomeType getBiome(BlockVector3 position) {
         checkNotNull(position);
+        var pending = writer == null ? null
+                : writer.pending(EditDelta.Kind.BIOME, position.x() & ~3, position.y() & ~3, position.z() & ~3);
+        if (pending != null) {
+            return com.sk89q.worldedit.world.biome.BiomeTypes.get(pending.value().id());
+        }
         ChunkAccess chunk = getWorld().getChunk(position.x() >> 4, position.z() >> 4);
         return getBiomeInChunk(position, chunk);
     }
@@ -364,6 +469,11 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public boolean setBiome(int x, int y, int z, BiomeType biome) {
         checkNotNull(biome);
+        if (writer != null) {
+            writer.write(EditDelta.Kind.BIOME, x & ~3, y & ~3, z & ~3, new EditValue(biome.id(), null), null,
+                    SideEffectSet.none());
+            return true;
+        }
         return nativeWrite(EditDelta.Kind.BIOME, BlockVector3.at(x & ~3, y & ~3, z & ~3),
                 SideEffectSet.none(), () -> new EditValue(biome.id(), null));
     }
@@ -753,6 +863,10 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public BlockState getBlock(BlockVector3 position) {
+        var pending = writer == null ? null : writer.pending(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z());
+        if (pending != null) {
+            return pending.block().toImmutableState();
+        }
         net.minecraft.world.level.block.state.BlockState mcState = getWorld()
                 .getChunk(position.x() >> 4, position.z() >> 4)
                 .getBlockState(FabricAdapter.toBlockPos(position));
@@ -762,7 +876,11 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public BaseBlock getFullBlock(BlockVector3 position) {
-        return TaskManager.taskManager().sync(() -> {
+        var pending = writer == null ? null : writer.pending(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z());
+        if (pending != null) {
+            return pending.block();
+        }
+        return com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () -> {
             BlockPos pos = FabricAdapter.toBlockPos(position);
             if (getWorld().getBlockEntity(pos) != null) {
                 NativeClaims.snapshot((ServerLevel) getWorld(), editContext, position.x() >> 4, position.z() >> 4);
@@ -776,7 +894,8 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     /** Last immutable native result; a failed finalization is also retained here. */
     public CommitReceipt lastNativeReceipt() {
-        return lastNativeReceipt;
+        CommitReceipt batched = writer == null ? null : writer.last();
+        return batched != null ? batched : lastNativeReceipt;
     }
 
     // Synchronous WNA callers may wait only off-thread; owner callers must use the asynchronous API.
@@ -789,20 +908,24 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         if (editContext == null) {
             throw new UnsupportedOperationException("Native edits require a bound current actor");
         }
-        boolean replay = editContext.source() == EditActorContext.Source.UNDO
-                || editContext.source() == EditActorContext.Source.REDO;
-        EditActorContext unit = new EditActorContext(editContext.actorId(), editContext.actorName(),
-                editContext.source(), java.util.UUID.randomUUID(),
-                replay ? editContext.parentId() : editContext.operationId(), editContext.originalActorId(),
-                editContext.dimension(), effects, editContext.cancellation().child(), editContext.operationId());
+        // Cross-cell callbacks may read any cell, so every earlier write is published first.
+        writer.drain();
+        EditActorContext unit = unitContext(effects);
         // A player's command or tool is asked again at this cell's publication, like fawe-coordinated.
         if (authority != null) {
             com.fastasyncworldedit.fabric.edit.FabricRegionCommands.authorizeWith(unit.operationId(), authority);
         }
         try {
-            var completion = TaskManager.taskManager().sync(() -> FabricEdits.nativeService(level.getServer())
-                    .submitNative(unit, kind, pos, target.get(), nativeHistory));
-            CommitReceipt receipt = completion.toCompletableFuture().join();
+            var submitted = com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(level.getServer(), () ->
+                    FabricEdits.nativeService(level.getServer()).submitNativeChunk(unit, pos.x() >> 4, pos.z() >> 4,
+                            List.of(new FabricEdits.NativeCell(kind, pos.x(), pos.y(), pos.z(), target.get())),
+                            nativeHistory));
+            List<CommitReceipt> receipts = submitted.completion().toCompletableFuture().join();
+            skipped.addAll(submitted.skipped());
+            if (receipts.isEmpty()) {
+                return false;
+            }
+            CommitReceipt receipt = receipts.getFirst();
             lastNativeReceipt = receipt;
             if (receipt.outcome() == CommitReceipt.Outcome.CONFLICT) {
                 throw new IllegalStateException("Native edit conflicted before publication");
@@ -819,13 +942,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             }
             // Each cell has its own cancellation, so any other failure must stop the operation here.
             editContext.cancellation().cancel();
-            if (operatorRefused(failure)) {
-                // An expected stop, reported like any other FAWE cancellation rather than as a crash.
-                throw new com.fastasyncworldedit.core.internal.exception.FaweException("Stopped: the player"
-                        + " disconnected or no longer has permission for this edit; changes made before this"
-                        + " point are kept and can be undone");
-            }
-            throw failure;
+            throw stopped(failure);
         } finally {
             if (authority != null) {
                 com.fastasyncworldedit.fabric.edit.FabricRegionCommands.forgetAuthority(unit.operationId());
@@ -918,6 +1035,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Nullable
     @Override
     public Entity createEntity(Location location, BaseEntity entity) {
+        drainForEntities();
         return TaskManager.taskManager().sync(() -> spawn(location, entity, null));
     }
 
@@ -925,12 +1043,14 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Nullable
     @Override
     public Entity createEntity(Location location, BaseEntity entity, UUID uuid) {
+        drainForEntities();
         return TaskManager.taskManager().sync(() -> spawn(location, entity, uuid));
     }
 
     /** Undo of a creation: remove exactly that entity, wherever it went; absent means already gone. */
     @Override
     public void removeEntity(int x, int y, int z, UUID uuid) {
+        drainForEntities();
         TaskManager.taskManager().sync(() -> {
             NativeClaims.unsupported("entity removal");
             net.minecraft.world.entity.Entity target = ((ServerLevel) getWorld()).getEntity(uuid);
@@ -1018,8 +1138,24 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public void flush() {
-        worldNativeAccess.flush();
-        reportSkipped();
+        try {
+            if (writer != null) {
+                writer.drain();
+            }
+        } finally {
+            if (writer != null) {
+                skipped.addAll(writer.takeSkipped());
+            }
+            worldNativeAccess.flush();
+            reportSkipped();
+        }
+    }
+
+    // Entities follow the blocks written before them, which they may rest on or hang from.
+    private void drainForEntities() {
+        if (writer != null) {
+            writer.drain();
+        }
     }
 
     private static final int SKIPPED_LISTED = 8;
@@ -1054,6 +1190,16 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public boolean tile(int x, int y, int z, FaweCompoundTag tile) throws WorldEditException {
+        if (writer != null) {
+            var pending = writer.pending(EditDelta.Kind.BLOCK, x, y, z);
+            String id = pending != null ? pending.value().id()
+                    : com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () ->
+                            FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString());
+            var nbt = NBTConverter.toNative(tile.linTag());
+            writer.write(EditDelta.Kind.BLOCK, x, y, z, new EditValue(id, FrozenNbt.capture(nbt)),
+                    BlockState.get(id).toBaseBlock(tile.linTag()), SideEffectSet.none());
+            return true;
+        }
         return nativeWrite(EditDelta.Kind.BLOCK, BlockVector3.at(x, y, z), SideEffectSet.none(), () ->
                 new EditValue(FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString(),
                         FrozenNbt.capture(NBTConverter.toNative(tile.linTag()))));
