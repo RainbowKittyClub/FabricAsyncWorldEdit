@@ -451,7 +451,9 @@ public final class FabricCommitCoordinator {
                         || !FabricRegionCommands.authorized(proposal.context(), player)) {
                     throw new OperatorRefusedException();
                 }
-                if (!access.matches(proposal, level, !unit.nativeMutation, unit.rebase)) {
+                boolean rebase = unit.rebase
+                        && unit.reservations.stream().allMatch(EditIntegration.Reservation::acceptsChangedBefore);
+                if (!access.matches(proposal, level, !unit.nativeMutation, rebase)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
                 } else {
                     if (!unit.nativeMutation) {
@@ -516,7 +518,7 @@ public final class FabricCommitCoordinator {
                     for (EditIntegration.Reservation reservation : unit.reservations) {
                         reservation.beforePublication(level, finalWrite, directSections);
                     }
-                    if (!access.matches(proposal, level, !unit.nativeMutation, unit.rebase)) {
+                    if (!access.matches(proposal, level, !unit.nativeMutation, rebase)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
                     }
                     // Callbacks run once every cell is written, so none sees a half-written unit.

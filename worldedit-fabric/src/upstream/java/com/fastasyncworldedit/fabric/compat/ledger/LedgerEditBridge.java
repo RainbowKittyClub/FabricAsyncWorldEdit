@@ -218,6 +218,12 @@ public final class LedgerEditBridge implements EditIntegration {
             return position != null && intent.get(position).equals(actualDelta);
         }
 
+        // The journaled intent names each before-value; a changed one needs a fresh intent.
+        @Override
+        public boolean acceptsChangedBefore() {
+            return false;
+        }
+
         @Override
         public CompletionStage<Void> reconcile(ServerLevel level, CommitReceipt receipt) {
             return CompletableFuture.completedFuture(null);

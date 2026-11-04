@@ -89,6 +89,15 @@ public interface EditIntegration {
         }
 
         /**
+         * Whether a session unit may take a changed plain before-value as found. A provider that
+         * holds the exact proposed deltas (a journaled intent) returns false, so a changed cell
+         * conflicts and is re-prepared with a fresh proposal.
+         */
+        public default boolean acceptsChangedBefore() {
+            return true;
+        }
+
+        /**
          * Route-aware prepublication scope; this is the only prepublication hook the coordinator
          * invokes. {@code directSections} is true only when every authorized delta will be
          * published by replacing whole sections and no ordinary cell write will occur in this
