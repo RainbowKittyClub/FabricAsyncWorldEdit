@@ -85,7 +85,8 @@ public final class OpacAuthorizer implements EditIntegration {
         return new Checks(context, List.of()).authorize(level, operator, context, delta);
     }
 
-    // One change's answer within one tick: OPAC decides by chunk, player and the block states.
+    // One change's answer within one tick. OPAC's edge check offsets along the hit direction, and
+    // UP never leaves the chunk, so for these calls only chunk, player and block states matter.
     private record Change(EditDelta.Kind kind, int chunkX, int chunkZ, String before, String after,
             boolean beforeNbt, boolean afterNbt) { }
 
