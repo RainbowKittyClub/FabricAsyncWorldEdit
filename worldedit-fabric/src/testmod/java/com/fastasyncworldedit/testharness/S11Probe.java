@@ -49,6 +49,12 @@ public final class S11Probe implements ModInitializer {
     @Override
     public void onInitialize() {
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.START_SERVER_TICK.register(server -> {
+            String deop = DEOP;
+            if (deop != null && FabricEdits.nativeService(server).publicationTimeline().stream()
+                    .anyMatch(publication -> publication.tick() > DEOP_AFTER)) {
+                DEOP = null;
+                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), "deop " + deop);
+            }
             BlockPos toggle = TOGGLE;
             if (toggle != null) {
                 var level = server.overworld();
@@ -128,6 +134,12 @@ public final class S11Probe implements ModInitializer {
                 TOGGLE = words[1].equals("off") ? null
                         : new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
                 return GSON.toJson(Map.of("toggle", String.valueOf(TOGGLE)));
+            }
+            // deop-on-publish player: de-op them on the tick after the next publication.
+            case "deop-on-publish" -> {
+                DEOP_AFTER = server.getTickCount();
+                DEOP = words[1];
+                return GSON.toJson(Map.of("armed", DEOP, "after", DEOP_AFTER));
             }
             // ryw player x y z: an API session reads its own write before it is flushed.
             case "ryw" -> {
@@ -232,6 +244,8 @@ public final class S11Probe implements ModInitializer {
     }
 
     private static volatile BlockPos TOGGLE;
+    private static volatile String DEOP;
+    private static volatile int DEOP_AFTER;
 
     // FAWE's asynchronous coordinated API, submitted on the owner thread.
     private static void bulkEdit(MinecraftServer server, ServerPlayer player, BlockState block, int[] box,

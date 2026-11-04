@@ -15,6 +15,9 @@ const NEGATIVE = 'forceload add -5024 -5024 -4992 -4992'
 // One cell wide across 64 chunks: one unit each, so losing permission part-way leaves whole units.
 const REVOKE = [5000, 80, 3968, 5000, 80, 4991]
 const REVOKE_AREA = 'forceload add 5000 3968 5000 4991'
+// A row over 5 chunks of 8, 16, 16, 16 and 8 cells: one unit each, all sent in the final flush.
+const FINAL = [5000, 86, 5003, 5063, 86, 5003]
+const FINAL_PREFIXES = [8, 24, 40, 56]
 const applied = receipts => receipts.reduce((sum, receipt) => sum + receipt.applied, 0)
 
 // Each case: a box and the state every cell must hold, or the states it may hold.
@@ -164,6 +167,38 @@ module.exports = ({ rig, check, paced }) => {
       routed('coordinated', delta(before, await probe(send, 'coverage')), 'bulk', 'PLAYER', BULK_STAGES)
       await select(5022, 82, 5004, 5023, 82, 5004)
       await chatCommand('/set bricks', /Skipped 2 unsupported blocks/)
+
+      // Losing permission while the final flush publishes: reported, remembered exactly, undoable.
+      const historyBefore = JSON.parse(await send(`fawes10 history ${name}`)).entries.length
+      await select(...FINAL)
+      const finalOffset = fs.statSync(client.entry.log).size
+      await probe(send, `deop-on-publish ${name}`)
+      await client.send({ action: 'command', command: '/set gold_block' })
+      let finalLast = -1
+      await rig.wait('final-flush leg settled', async () => {
+        const now = await count(send, FINAL, 'gold_block')
+        const settled = now > 0 && now === finalLast
+        finalLast = now
+        return settled
+      }, 30000, [client.entry])
+      check('final-flush-partial', FINAL_PREFIXES.includes(finalLast), { written: finalLast })
+      let finalChat = ''
+      for (const end = Date.now() + 10000; Date.now() < end;) {
+        finalChat = fs.readFileSync(client.entry.log, 'utf8').slice(finalOffset)
+        if (/Stopped: the player disconnected or no longer has permission/.test(finalChat)) break
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      check('final-flush-reported', /Stopped: the player disconnected or no longer has permission/.test(finalChat), {})
+      await send(`op ${name}`)
+      let finalHistory
+      await rig.wait('final-flush edit remembered', async () => {
+        finalHistory = JSON.parse(await send(`fawes10 history ${name}`)).entries
+        return finalHistory.length > historyBefore
+      }, 10000, [client.entry]).catch(() => {})
+      check('final-flush-history-exact', finalHistory.length === historyBefore + 1 &&
+        finalHistory.at(-1).size === finalLast, { historyBefore, entries: finalHistory.length, last: finalHistory.at(-1) })
+      await chatCommand('/undo', /Undid/)
+      check('final-flush-undo-exact', await count(send, FINAL, 'gold_block') === 0, {})
 
       // The player's command is asked again per cell: losing it part-way stops the rest, and the
       // history holds exactly what was written.
