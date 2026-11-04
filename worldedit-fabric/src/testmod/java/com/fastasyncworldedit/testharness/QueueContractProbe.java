@@ -318,6 +318,7 @@ public final class QueueContractProbe implements ModInitializer, EditIntegration
         }
         @Override
         public CompletionStage<Void> record(CommitReceipt receipt) {
+            HistoryProbe.observe(receipt);
             return CompletableFuture.completedFuture(null);
         }
         @Override

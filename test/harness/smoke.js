@@ -194,7 +194,16 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
     rcon.close()
     await launch('restart')
     await send('forceload add 1008 1008 1055 1055')
-    if (extension) await extension.restart(rig, send)
+    if (extension) {
+      // The same player rejoins after the restart only when a lane asks for it (history replay).
+      let rejoined
+      if (extension.restartClient) {
+        client = await startClient(rig, repo, { name, port: game.port, secondary: true, ...extension?.clientOptions })
+        rejoined = { client, edit, chatCommand, expected }
+      }
+      await extension.restart(rig, send, name, rejoined)
+      if (rejoined) await rig.stop(client.entry)
+    }
     for (const x of [1024, 1025]) for (const z of [1024, 1025]) await expected(x, 80, z, 'minecraft:gold_block')
     await expectInventory(1030, 'diamond', 3)
     await expectInventory(1032, 'diamond', 3)
