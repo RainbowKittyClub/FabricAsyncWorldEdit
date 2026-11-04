@@ -18,6 +18,8 @@ import net.minecraft.world.level.LightLayer;
 /** `fawes9`: light, POI, path-cache and policy probes for the S9 lane, all read on the server thread. */
 public final class OptimizationProbe implements ModInitializer {
     private static final Gson GSON = new Gson();
+    /** Read by the LightBarrierHold mixin: while set, light barriers also wait for it. */
+    public static volatile java.util.concurrent.CompletableFuture<Void> lightGate;
     private static final String HEX = "0123456789abcdef";
 
     @Override
@@ -74,6 +76,27 @@ public final class OptimizationProbe implements ModInitializer {
             // The cached path type: a stale cache keeps the value from before an edit.
             case "pathtype" -> {
                 return GSON.toJson(Map.of("type", level.getPathTypeCache().getOrCompute(level, pos(words)).name()));
+            }
+            case "hold" -> {
+                if (words[1].equals("on")) {
+                    lightGate = new java.util.concurrent.CompletableFuture<>();
+                } else {
+                    var gate = lightGate;
+                    lightGate = null;
+                    if (gate != null) gate.complete(null);
+                }
+                return GSON.toJson(Map.of("held", lightGate != null));
+            }
+            // Milestone counters and the preparation service's ticket accounting.
+            case "stats" -> {
+                var service = com.fastasyncworldedit.fabric.edit.FabricEdits.get(level.getServer());
+                Map<String, Object> answer = new HashMap<>(service.publicationStatistics());
+                answer.putAll(service.preparationStatistics());
+                return GSON.toJson(answer);
+            }
+            case "loaded" -> {
+                return GSON.toJson(Map.of("loaded", level.getChunkSource().getChunkNow(
+                        Integer.parseInt(words[1]) >> 4, Integer.parseInt(words[2]) >> 4) != null));
             }
             case "optimizations" -> {
                 Map<String, Object> answer = new HashMap<>();

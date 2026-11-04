@@ -78,6 +78,21 @@ async function main () {
       }
       return previous
     }
+    // The held-barrier glowstone at 3360,80,3360 and its control 64 blocks east.
+    const settledBox = async (send, dx) => {
+      const read = () => probe(send, `light ${3357 + dx} 77 3357 ${3363 + dx} 83 3363`)
+      const deadline = Date.now() + 60000
+      let previous = await read()
+      let agreeing = 0
+      while (agreeing < 2) {
+        if (Date.now() > deadline) throw new GateError('Held-cell light never settled')
+        await sleep(600)
+        const now = await read()
+        agreeing = differences(now, previous).count === 0 ? agreeing + 1 : 0
+        previous = now
+      }
+      return previous
+    }
     await smoke(rig, repo, workspace, profile, undefined, {
       jvmArgs: ['-Dfawe.experimental.coordinated=true'],
       async contract (rig, send, name, { client, chatCommand: sendChatCommand, expected }) {
@@ -162,6 +177,36 @@ async function main () {
         await sleep(1500)
         check('poi-follows-declared-side-effects', (await probe(send, 'poi 3284 80 3264')).poi === null &&
           (await probe(send, 'poi 3286 80 3264')).poi === 'minecraft:meeting', {})
+        // Forced barrier: the light barrier is held while a unit sits published but not relit, in a chunk
+        // nothing but FAWE's lease keeps loaded; a save runs meanwhile. Released, each milestone advances
+        // once, every ticket is returned, and the light matches a vanilla control (after restart too).
+        const before = await probe(send, 'stats')
+        await probe(send, 'hold on')
+        await select(3360, 80, 3360, 3360, 80, 3360)
+        await chatCommand('fawe-coordinated set glowstone', /Coordinated edit admitted/)
+        await rig.wait('held unit published', async () =>
+          (await send('execute if block 3360 80 3360 minecraft:glowstone')) === 'Test passed', 30000, [client.entry])
+        const held = await probe(send, 'stats')
+        await send('save-all flush')
+        const loaded = (await probe(send, 'loaded 3360 3360')).loaded
+        check('held-unit-keeps-its-ticket', held.published === before.published + 1 && held.recorded === before.recorded &&
+          held.tickets >= 1 && loaded, { before, held, loaded })
+        await probe(send, 'hold off')
+        await rig.wait('held unit recorded', async () => (await probe(send, 'stats')).recorded === before.recorded + 1, 30000, [client.entry])
+        await rig.wait('tickets returned', async () => {
+          const stats = await probe(send, 'stats')
+          return stats.tickets === 0 && stats.acquired === stats.released
+        }, 30000, [client.entry])
+        const after = await probe(send, 'stats')
+        check('milestones-advance-together', ['published', 'relit', 'reconciled', 'sent', 'recorded']
+          .every(key => after[key] - before[key] === 1), { before, after })
+        await send('forceload add 3352 3352 3439 3367')
+        if (!/Changed the block/.test(await send('setblock 3424 80 3360 minecraft:glowstone'))) {
+          throw new GateError('Control glowstone was not placed')
+        }
+        const heldA = await settledBox(send, 0)
+        const heldB = await settledBox(send, OFFSET)
+        check('held-light-converged', differences(heldA, heldB).count === 0, differences(heldA, heldB))
         rig.results.push({ gate: 's9-light-and-caches', status: 'passed', checks: report.checks.map(entry => entry.name) })
       },
       // After an unload and restart, site A's light still matches the control.
@@ -171,6 +216,10 @@ async function main () {
         const afterA = await settled(send, 0, 'A after restart')
         const afterB = await settled(send, OFFSET, 'B after restart')
         check('light-after-restart', differences(afterA, afterB).count === 0, differences(afterA, afterB))
+        await send('forceload add 3352 3352 3439 3367')
+        const heldA = await settledBox(send, 0)
+        const heldB = await settledBox(send, OFFSET)
+        check('held-light-after-restart', differences(heldA, heldB).count === 0, differences(heldA, heldB))
         check('poi-after-restart', (await probe(send, 'poi 3284 80 3264')).poi === null &&
           (await probe(send, 'poi 3286 80 3264')).poi === 'minecraft:meeting', {})
       }
