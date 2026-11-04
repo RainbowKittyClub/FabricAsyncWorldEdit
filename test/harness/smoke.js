@@ -3,6 +3,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { spawnSync } = require('node:child_process')
 const { GateError, writeJson, verify, hash } = require('./rig')
 const { classpath, startClient, offlineUuid } = require('./native')
 
@@ -42,9 +43,20 @@ async function smoke (rig, repo, workspace, profile = 'reference', fault, extens
   let server, rcon, client
   let playerCommands = 0
   const send = async command => {
-    const answer = await rcon.send(command)
-    records.push({ command, answer })
-    return answer
+    try {
+      const answer = await rcon.send(command)
+      records.push({ command, answer })
+      return answer
+    } catch (error) {
+      // A missed deadline usually means a stuck server thread; keep its stacks before teardown kills it.
+      if (/deadline exceeded/.test(error.message) && server?.child?.exitCode === null) {
+        const dump = spawnSync('jcmd', [String(server.child.pid), 'Thread.print', '-l'], { encoding: 'utf8', timeout: 30000 })
+        const file = path.join(rig.root, `server-threads-${Date.now()}.txt`)
+        fs.writeFileSync(file, dump.stdout || dump.stderr || String(dump.error))
+        records.push({ command, threadDump: file })
+      }
+      throw error
+    }
   }
   const launch = async suffix => {
     server = rig.spawn(`server-${suffix}`, 'java', ['-Xmx3G', ...(extension?.jvmArgs || []),
