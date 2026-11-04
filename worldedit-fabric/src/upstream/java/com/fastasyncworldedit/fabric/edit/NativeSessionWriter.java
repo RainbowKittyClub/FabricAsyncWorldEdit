@@ -41,7 +41,10 @@ public final class NativeSessionWriter {
     // Admitted to the coordinator at once, a share of its 32-unit admission.
     private static final int ADMITTED_UNITS = 4;
 
-    /** The session's side of each unit; every method but {@link #server} runs on the server thread. */
+    /**
+     * The session's side of each unit. {@link #server} and {@link #history} are asked on the editing
+     * thread, the rest on the server thread.
+     */
     public interface Host {
         MinecraftServer server();
 
@@ -53,6 +56,7 @@ public final class NativeSessionWriter {
 
         void forget(UUID operation);
 
+        /** The history attached now; a write is recorded where it was when the write was made. */
         Consumer<CommitReceipt> history();
 
         /** Cancel every remaining unit of the session. */
@@ -72,14 +76,16 @@ public final class NativeSessionWriter {
         private final int chunkX;
         private final int chunkZ;
         private final SideEffectSet effects;
+        private final Consumer<CommitReceipt> history;
         private final LinkedHashMap<Long, FabricEdits.NativeCell> blocks = new LinkedHashMap<>();
         private final LinkedHashMap<Long, FabricEdits.NativeCell> biomes = new LinkedHashMap<>();
         private long bytes;
 
-        private Buffer(int chunkX, int chunkZ, SideEffectSet effects) {
+        private Buffer(int chunkX, int chunkZ, SideEffectSet effects, Consumer<CommitReceipt> history) {
             this.chunkX = chunkX;
             this.chunkZ = chunkZ;
             this.effects = effects;
+            this.history = history;
         }
 
         private long chunk() {
@@ -181,8 +187,10 @@ public final class NativeSessionWriter {
             throw failure;
         }
         long chunk = chunkKey(x >> 4, z >> 4);
+        Consumer<CommitReceipt> history = host.history();
         Buffer buffer = open.get(chunk);
-        if (buffer != null && !sameEffects(buffer.effects, effects)) {
+        // A unit has one set of side effects and one history: a change seals what came before.
+        if (buffer != null && (!sameEffects(buffer.effects, effects) || buffer.history != history)) {
             seal(buffer);
             buffer = null;
         }
@@ -190,7 +198,7 @@ public final class NativeSessionWriter {
             if (open.size() == OPEN_CHUNKS) {
                 seal(open.values().iterator().next());
             }
-            buffer = new Buffer(x >> 4, z >> 4, effects);
+            buffer = new Buffer(x >> 4, z >> 4, effects, history);
             open.put(chunk, buffer);
         }
         long key = BlockPos.asLong(x, y, z);
@@ -303,7 +311,7 @@ public final class NativeSessionWriter {
             context = host.unitContext(buffer.effects);
             host.authorize(context.operationId());
             var unit = FabricEdits.nativeService(host.server()).submitNativeChunk(context, buffer.chunkX,
-                    buffer.chunkZ, buffer.cells(), host.history());
+                    buffer.chunkZ, buffer.cells(), buffer.history);
             EditActorContext submitted = context;
             unit.completion().whenComplete((receipts, problem) -> finish(buffer, submitted, unit, receipts, problem));
         } catch (FabricEdits.NativeCapacityException full) {
