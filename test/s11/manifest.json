@@ -1435,9 +1435,8 @@
       "nested": []
     },
     "player-portals": {
-      "path": "/mnt/WORKSPACE/minecraft-server-data/felis-novum/mods/playerportals-0.2.0+26.3.jar",
-      "bytes": 232164,
-      "sha256": "63a0e198ef49c319b6b4a9552a46d26fe9a14b4a9981363821d9ce75e1f83018",
+      "path": "/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/player-portals-fawe-lifecycle/playerportals-0.2.0+26.3.jar",
+      "sha256": "dc468de2ebcc802d2d6b111b570086cb23a0fbe3ecb8460ef0c37abb9dbbef96",
       "nested": []
     },
     "terrestria": {
@@ -1776,7 +1775,7 @@
     },
     "candidate": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "dc6b3b4a74d162cde4a8abbbd2974a3585db1a28a74c986f4fe80e096ef675a2",
+      "sha256": "d7ac629cf69d7bc4676ca8bcf1d4014e557bb45f9bce63d2cedf0d804a83fcad",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
