@@ -45,6 +45,9 @@ if fixture['sha256'] != s7['artifacts']['fixture']['sha256']:
     raise RuntimeError('S7 fixture jar differs from its pin')
 deps['polymer-fixture'] = fixture
 manifest['profiles']['polymer-content'] = [*manifest['profiles']['polymer'], 'polymer-fixture']
+# The accepted Polymer is the published fork build: S7's bulk-edit API plus the vanilla-id fix.
+deps['polymer-accepted'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/polymer-0.18.6-rkc.3/'
+                                    'polymer-bundled-0.18.6-rkc.3+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
