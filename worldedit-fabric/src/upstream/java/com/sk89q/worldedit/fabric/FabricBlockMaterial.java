@@ -19,8 +19,10 @@
 
 package com.sk89q.worldedit.fabric;
 
+import com.fastasyncworldedit.fabric.edit.LifecycleDeclarations;
 import com.sk89q.worldedit.world.registry.BlockMaterial;
 import com.sk89q.worldedit.world.registry.PassthroughBlockMaterial;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.PushReaction;
 
@@ -91,6 +93,14 @@ public class FabricBlockMaterial extends PassthroughBlockMaterial {
     @Override
     public boolean isReplacedDuringPlacement() {
         return block.canBeReplaced();
+    }
+
+    // The bundled block info lists only vanilla blocks, so a mod's chest would read as no container
+    // and a clipboard would drop its items.
+    @Override
+    public boolean hasContainer() {
+        return LifecycleDeclarations.container(BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString())
+                || super.hasContainer();
     }
 
 }

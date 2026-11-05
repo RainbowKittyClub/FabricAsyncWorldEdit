@@ -420,8 +420,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             }
             BlockState state = BlockState.get(before.id());
             String id = state.getBlockType().id();
-            if (!Set.of("minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
-                    "minecraft:furnace").contains(id)) {
+            if (!com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.container(id)) {
                 throw new UnsupportedOperationException("No verified native inventory codec for " + id);
             }
             var cleared = before.nbt().thaw();
@@ -440,8 +439,7 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                 return before;
             }
             String id = FabricAdapter.adapt(getWorld().getBlockState(pos)).getBlockType().id();
-            if (!Set.of("minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
-                    "minecraft:furnace").contains(id)) {
+            if (!com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.container(id)) {
                 throw new UnsupportedOperationException("No verified native inventory codec for " + id);
             }
             var cleared = before.nbt().thaw();

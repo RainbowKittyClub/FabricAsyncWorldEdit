@@ -29,6 +29,12 @@ import net.minecraft.world.level.block.Block;
  * section write; only then may the block be installed into a section directly. Without that
  * participant the declaration stays on the per-cell route. A declaration that cannot be read is
  * ignored whole, never partly.
+ *
+ * <p>An optional {@code "containers"} list, in the same form and among the declared blocks, says
+ * these blocks' block entities keep their inventory under {@code Items} as a vanilla chest's does.
+ * A clipboard then keeps their contents, and a container an edit replaces is emptied first, so its
+ * items neither drop nor are lost to history. A container is declared only after a copy and paste
+ * has been seen to keep its items.
  */
 public final class LifecycleDeclarations {
     /** The custom value a mod declares its blocks under. */
@@ -45,10 +51,14 @@ public final class LifecycleDeclarations {
             "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace",
             "minecraft:bell", "minecraft:lectern", "minecraft:gold_block", "minecraft:diamond_block");
 
-    /** Declared blocks by registry id, and those among them a participant covers. */
-    private record Snapshot(Set<String> declared, Set<String> participant) { }
+    // The vanilla block entities whose inventory is known to sit under Items.
+    private static final Set<String> BASE_CONTAINERS = Set.of(
+            "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace");
 
-    private static volatile Snapshot snapshot = new Snapshot(Set.of(), Set.of());
+    /** Declared blocks by registry id, those among them a participant covers, and the containers. */
+    private record Snapshot(Set<String> declared, Set<String> participant, Set<String> containers) { }
+
+    private static volatile Snapshot snapshot = new Snapshot(Set.of(), Set.of(), Set.of());
 
     private LifecycleDeclarations() {
     }
@@ -56,6 +66,11 @@ public final class LifecycleDeclarations {
     /** Whether a block type, by registry id, has verified lifecycle support. */
     public static boolean supports(String blockId) {
         return BASE.contains(blockId) || snapshot.declared.contains(blockId);
+    }
+
+    /** Whether a block, by registry id, holds an inventory under {@code Items} that edits may keep and clear. */
+    public static boolean container(String blockId) {
+        return BASE_CONTAINERS.contains(blockId) || snapshot.containers.contains(blockId);
     }
 
     /**
@@ -85,6 +100,7 @@ public final class LifecycleDeclarations {
                 .forEach(container -> participantMods.add(container.getProvider().getMetadata().getId()));
         Set<String> declared = new HashSet<>();
         Set<String> participant = new HashSet<>();
+        Set<String> containers = new HashSet<>();
         for (ModContainer mod : FabricLoader.getInstance().getAllMods()) {
             var metadata = mod.getMetadata();
             if (!metadata.containsCustomValue(KEY)) {
@@ -99,7 +115,11 @@ public final class LifecycleDeclarations {
                     viaParticipant = false;
                 }
                 Set<String> blocks = resolve(value.get("blocks"));
+                // Both lists are read before either is kept; only a declared block can be a container.
+                Set<String> inventories = value.get("containers") == null ? new HashSet<>() : resolve(value.get("containers"));
+                inventories.retainAll(blocks);
                 declared.addAll(blocks);
+                containers.addAll(inventories);
                 if (viaParticipant) {
                     participant.addAll(blocks);
                 }
@@ -108,7 +128,7 @@ public final class LifecycleDeclarations {
                         failure.getMessage());
             }
         }
-        snapshot = new Snapshot(Set.copyOf(declared), Set.copyOf(participant));
+        snapshot = new Snapshot(Set.copyOf(declared), Set.copyOf(participant), Set.copyOf(containers));
     }
 
     private static boolean routeIsParticipant(CustomValue route) {

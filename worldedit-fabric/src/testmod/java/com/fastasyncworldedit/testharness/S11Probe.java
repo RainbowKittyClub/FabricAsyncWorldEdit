@@ -110,7 +110,8 @@ public final class S11Probe implements ModInitializer {
                 for (int i = 1; i < words.length; i++) {
                     blocks.add(Map.of("block", words[i],
                             "supported", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.supports(words[i]),
-                            "direct", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.directSafe(words[i])));
+                            "direct", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.directSafe(words[i]),
+                            "container", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.container(words[i])));
                 }
                 return GSON.toJson(Map.of("blocks", blocks,
                         "declared", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.declared().size()));
