@@ -16,7 +16,8 @@ function buildDriver (repo, manifest) {
   fs.rmSync(output, { recursive: true, force: true })
   fs.mkdirSync(output, { recursive: true })
   tool('javac', ['--release', '25', '-proc:none', '-cp', classpath(manifest, 'client'), '-d', output,
-    ...['testharness/NativeDriverMixin.java', 'fixture/PaletteFixture.java'].map(file =>
+    ...['testharness/NativeDriverMixin.java', 'testharness/PackChoiceMixin.java', 'testharness/BlockDisplayAccessor.java',
+      'fixture/PaletteFixture.java'].map(file =>
       path.join(repo, 'worldedit-fabric/src/testmod/java/com/fastasyncworldedit', file))])
   const jar = path.join(repo, 'build/fawe-native-probe.jar')
   tool('jar', ['--create', '--file', jar, '-C', output, '.', '-C', path.join(repo, 'test/native'), '.'])
@@ -63,7 +64,7 @@ async function startClient (rig, repo, options = {}) {
   const driver = buildDriver(repo, rig.manifest)
   writeJson(path.join(rig.root, 'native-driver.json'), { jarSha256: hash(driver),
     sourceSha256: hash(path.join(repo, 'worldedit-fabric/src/testmod/java/com/fastasyncworldedit/testharness/NativeDriverMixin.java')) })
-  const suffix = options.secondary ? '-secondary' : ''
+  const suffix = options.label ? `-${options.label}` : options.secondary ? '-secondary' : ''
   const screen = await display(rig, suffix)
   const dir = path.join(rig.root, `client${suffix}`)
   fs.mkdirSync(path.join(dir, 'mods'), { recursive: true })
@@ -85,7 +86,9 @@ async function startClient (rig, repo, options = {}) {
   writeJson(path.join(dir, 'installed-mods.json'), installed)
   const request = path.join(dir, 'request.json')
   const events = path.join(dir, 'events.jsonl')
-  const args = ['-Xmx3G', `-Dfawe.test.s4=${Boolean(options.palette)}`, `-Dclaude.scratch=fawe-${rig.manifest.runLabel}-${rig.token}`,
+  // A pack choice answers the server's resource pack offer; without one the client is left to prompt.
+  const pack = options.pack === undefined ? [] : [`-Dfawe.test.pack=${Boolean(options.pack)}`]
+  const args = ['-Xmx3G', ...pack, `-Dfawe.test.s4=${Boolean(options.palette)}`, `-Dclaude.scratch=fawe-${rig.manifest.runLabel}-${rig.token}`,
     '--enable-native-access=ALL-UNNAMED', '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED',
     '-XX:StackShadowPages=32', `-Dfawe.test.request=${request}`, `-Dfawe.test.events=${events}`,
     `-Dfawe.test.frames=${path.join(dir, 'frames')}`,

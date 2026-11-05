@@ -2,6 +2,6 @@
   "required": true,
   "package": "com.fastasyncworldedit.testharness",
   "compatibilityLevel": "JAVA_25",
-  "client": ["NativeDriverMixin"],
+  "client": ["NativeDriverMixin", "PackChoiceMixin", "BlockDisplayAccessor"],
   "injectors": {"defaultRequire": 1}
 }

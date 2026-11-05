@@ -37,5 +37,13 @@ audit = ['ledger-rkc', 'kotlin', 'universal-ledger', 'opac', 'forge-config']
 for key in audit:
     deps[key] = s8['availableDependencies'][key]
 manifest['profiles']['ledger-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
+# The polymer suite: the polymer set beside S7's fixture overlays, from the Polymer worktree's pins.
+s7 = json.loads(Path('/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/'
+                     'fawe-fast-editing-20261029-s7/test/bulk/s7-manifest.json').read_text())
+fixture = pin(Path(s7['artifacts']['fixture']['path']))
+if fixture['sha256'] != s7['artifacts']['fixture']['sha256']:
+    raise RuntimeError('S7 fixture jar differs from its pin')
+deps['polymer-fixture'] = fixture
+manifest['profiles']['polymer-content'] = [*manifest['profiles']['polymer'], 'polymer-fixture']
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))
