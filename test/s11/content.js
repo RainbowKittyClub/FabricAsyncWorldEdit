@@ -27,6 +27,9 @@ const CASES = [
   { name: 'door-source', box: [5230, 80, 5000, 5230, 81, 5000], expect: (x, y) => `minecraft:oak_door[facing=north,half=${y === 80 ? 'lower' : 'upper'},hinge=left,open=false,powered=false]` },
   { name: 'schematic-round-trip', box: [5234, 80, 5004, 5235, 80, 5004], expect: (x) => x === 5234 ? 'minecraft:furnace[facing=east,lit=false]' : 'minecraft:barrel[facing=up,open=false]' },
   { name: 'schematic-legacy', box: [5239, 80, 5004, 5239, 80, 5004], expect: () => CHEST },
+  // History brings back a block entity's data before its block: a redone paste and an undone removal.
+  { name: 'history-redone-chest', box: [5245, 80, 5004, 5245, 80, 5004], expect: () => CHEST },
+  { name: 'history-undone-removal', box: [5247, 80, 5004, 5247, 80, 5004], expect: () => CHEST },
   { name: 'tall-below', box: [0, -127, 0, 1, -126, 1], expect: () => 'minecraft:glass', dimension: TALL },
   { name: 'tall-above', box: [0, 380, 0, 1, 381, 1], expect: () => 'minecraft:glass', dimension: TALL }
 ]
@@ -40,7 +43,9 @@ const ITEMS = [
   [[5234, 80, 5004], 1, 'coal', 3],
   [[5235, 80, 5004], 0, 'stick', 9],
   // Stored as 1.20.4 `Count:3b`; only the data fixer turns it into `count`, else the stack reads as 1.
-  [[5239, 80, 5004], 0, 'diamond', 3]
+  [[5239, 80, 5004], 0, 'diamond', 3],
+  [[5245, 80, 5004], 0, 'lapis_lazuli', 6],
+  [[5247, 80, 5004], 0, 'emerald', 4]
 ]
 
 // A one-chest Sponge v3 schematic at DataVersion 3700 (1.20.4), with its items in the old format.
@@ -162,6 +167,16 @@ module.exports = ({ rig, check, paced }) => {
       await tp(5239, 80, 5004)
       await chatCommand('/paste', /clipboard has been pasted/)
       await chatCommand('/clearclipboard', /Clipboard cleared/)
+
+      // A chest pasted onto air, undone and redone; then a chest set to air and undone.
+      await send('setblock 5245 80 5000 minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:lapis_lazuli",count:6}]}')
+      await copyPaste([5245, 80, 5000, 5245, 80, 5000], 5244)
+      await chatCommand('/undo', /Undid/)
+      await chatCommand('/redo', /Redid/)
+      await send('setblock 5247 80 5004 minecraft:chest[facing=north]{Items:[{Slot:0b,id:"minecraft:emerald",count:4}]}')
+      await select(5247, 80, 5004, 5247, 80, 5004)
+      await chatCommand('/set air', /Operation completed/)
+      await chatCommand('/undo', /Undid/)
 
       // A dimension from y=-128 to 383: edits below and above the overworld's range.
       await send(`execute in ${TALL} run forceload add 0 0 15 15`)

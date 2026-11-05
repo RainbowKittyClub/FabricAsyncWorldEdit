@@ -168,6 +168,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     // Cells refused for lack of lifecycle support; the session leaves them unchanged and reports on flush.
     private final List<com.fastasyncworldedit.fabric.edit.UnsupportedBlockException> skipped =
             Collections.synchronizedList(new ArrayList<>());
+    // History replays a tile before the block change that creates its block entity, so a session's
+    // block entity data joins the next write to its cell, or is written alone at the flush.
+    private final Map<Long, FaweCompoundTag> heldTiles = new java.util.LinkedHashMap<>();
     private java.util.function.Consumer<CommitReceipt> nativeHistory = receipt -> { };
     private volatile CommitReceipt lastNativeReceipt;
 
@@ -364,11 +367,18 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             // Published with its chunk's unit; FAWE counts calls as changes either way. Validation
             // and callbacks run at publication.
             BaseBlock target = block.toBaseBlock();
+            FaweCompoundTag held;
+            synchronized (heldTiles) {
+                held = heldTiles.remove(BlockPos.asLong(position.x(), position.y(), position.z()));
+            }
             // An unsupported target is known now; an unsupported block it replaces, only at snapshot.
             if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(target.getBlockType().id())) {
                 skipped.add(new com.fastasyncworldedit.fabric.edit.UnsupportedBlockException(
                         target.toImmutableState().getAsString(), position.x(), position.y(), position.z()));
                 return false;
+            }
+            if (held != null && target.getNbt() == null && FabricAdapter.adapt(target.toImmutableState()).hasBlockEntity()) {
+                target = target.toImmutableState().toBaseBlock(held.linTag());
             }
             writer.write(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z(), editValue(target), target,
                     sideEffects);
@@ -874,6 +884,13 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     @Override
     public BaseBlock getFullBlock(BlockVector3 position) {
+        FaweCompoundTag held;
+        synchronized (heldTiles) {
+            held = heldTiles.get(BlockPos.asLong(position.x(), position.y(), position.z()));
+        }
+        if (held != null) {
+            return getBlock(position).toBaseBlock(held.linTag());
+        }
         var pending = writer == null ? null : writer.pending(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z());
         if (pending != null) {
             return pending.block();
@@ -1136,6 +1153,12 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     public void flush() {
         try {
             if (writer != null) {
+                Map<Long, FaweCompoundTag> tiles;
+                synchronized (heldTiles) {
+                    tiles = new java.util.LinkedHashMap<>(heldTiles);
+                    heldTiles.clear();
+                }
+                tiles.forEach((key, tile) -> writeTile(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key), tile));
                 writer.drain();
             }
         } finally {
@@ -1187,23 +1210,30 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
     @Override
     public boolean tile(int x, int y, int z, FaweCompoundTag tile) throws WorldEditException {
         if (writer != null) {
-            var pending = writer.pending(EditDelta.Kind.BLOCK, x, y, z);
-            String id = pending != null ? pending.value().id()
-                    : com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () ->
-                            FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString());
-            BlockState state = BlockState.get(id);
-            if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(state.getBlockType().id())) {
-                skipped.add(new com.fastasyncworldedit.fabric.edit.UnsupportedBlockException(id, x, y, z));
-                return false;
+            synchronized (heldTiles) {
+                heldTiles.put(BlockPos.asLong(x, y, z), tile);
             }
-            var nbt = NBTConverter.toNative(tile.linTag());
-            writer.write(EditDelta.Kind.BLOCK, x, y, z, new EditValue(id, FrozenNbt.capture(nbt)),
-                    state.toBaseBlock(tile.linTag()), SideEffectSet.none());
             return true;
         }
         return nativeWrite(EditDelta.Kind.BLOCK, BlockVector3.at(x, y, z), SideEffectSet.none(), () ->
                 new EditValue(FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString(),
                         FrozenNbt.capture(NBTConverter.toNative(tile.linTag()))));
+    }
+
+    // Block entity data alone, on whatever the cell holds once the session's other writes are queued.
+    private void writeTile(int x, int y, int z, FaweCompoundTag tile) {
+        var pending = writer.pending(EditDelta.Kind.BLOCK, x, y, z);
+        String id = pending != null ? pending.value().id()
+                : com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () ->
+                        FabricAdapter.adapt(getWorld().getBlockState(new BlockPos(x, y, z))).getAsString());
+        BlockState state = BlockState.get(id);
+        if (!com.fastasyncworldedit.fabric.edit.FabricWorldAccess.lifecycleSupported(state.getBlockType().id())) {
+            skipped.add(new com.fastasyncworldedit.fabric.edit.UnsupportedBlockException(id, x, y, z));
+            return;
+        }
+        var nbt = NBTConverter.toNative(tile.linTag());
+        writer.write(EditDelta.Kind.BLOCK, x, y, z, new EditValue(id, FrozenNbt.capture(nbt)),
+                state.toBaseBlock(tile.linTag()), SideEffectSet.none());
     }
 
     private static final class LiquidMask extends AbstractExtentMask {
