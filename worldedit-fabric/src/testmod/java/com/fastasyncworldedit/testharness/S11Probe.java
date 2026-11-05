@@ -104,6 +104,17 @@ public final class S11Probe implements ModInitializer {
             case "coverage" -> {
                 return GSON.toJson(EditCoverage.snapshot());
             }
+            // lifecycle <block>...: whether FAWE edits each block, and may install it into a section directly.
+            case "lifecycle" -> {
+                List<Map<String, Object>> blocks = new ArrayList<>();
+                for (int i = 1; i < words.length; i++) {
+                    blocks.add(Map.of("block", words[i],
+                            "supported", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.supports(words[i]),
+                            "direct", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.directSafe(words[i])));
+                }
+                return GSON.toJson(Map.of("blocks", blocks,
+                        "declared", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.declared().size()));
+            }
             // selection <player>: the session selector's world and region bounds, as WorldEdit sees them.
             case "selection" -> {
                 ServerPlayer player = server.getPlayerList().getPlayerByName(words[1]);

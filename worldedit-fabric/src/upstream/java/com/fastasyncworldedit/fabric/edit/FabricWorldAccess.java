@@ -30,14 +30,6 @@ import net.minecraft.world.level.storage.TagValueInput;
 
 /** Owner-thread vanilla access; unsupported callbacks and payload families are refused before writes. */
 public final class FabricWorldAccess {
-    private static final Set<String> SUPPORTED_BLOCKS = Set.of(
-            "minecraft:air", "minecraft:cave_air", "minecraft:void_air", "minecraft:stone",
-            "minecraft:dirt", "minecraft:cobblestone", "minecraft:glass", "minecraft:glowstone",
-            "minecraft:oak_log", "minecraft:birch_log", "minecraft:stripped_oak_log",
-            "minecraft:acacia_log", "minecraft:jungle_log", "minecraft:redstone_lamp",
-            "minecraft:oak_planks", "minecraft:grass_block", "minecraft:water",
-            "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:furnace",
-            "minecraft:bell", "minecraft:lectern", "minecraft:gold_block", "minecraft:diamond_block");
     private final MinecraftServer server;
     private final FabricOptimizations optimizations = FabricOptimizations.detect();
     private FabricStateMapping mapping;
@@ -173,7 +165,7 @@ public final class FabricWorldAccess {
         }
         var state = mapping.nativeState(current.id());
         return !state.hasBlockEntity()
-                && SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                && LifecycleDeclarations.supports(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     /** Validate the entire bounded unit before any mutation, not after a partial unsupported write. */
@@ -233,9 +225,9 @@ public final class FabricWorldAccess {
         }
     }
 
-    /** Whether a block type, by registry id, has verified lifecycle support. */
+    /** Whether a block type, by registry id, has verified lifecycle support (the base set or a mod's declaration). */
     public static boolean lifecycleSupported(String blockId) {
-        return SUPPORTED_BLOCKS.contains(blockId);
+        return LifecycleDeclarations.supports(blockId);
     }
 
     /** The lifecycle refusal this delta would meet at publication, or null. */
@@ -245,7 +237,7 @@ public final class FabricWorldAccess {
         }
         for (EditValue value : new EditValue[] {delta.before(), delta.after()}) {
             var state = mapping.nativeState(value.id());
-            if (!SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
+            if (!LifecycleDeclarations.supports(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
                 return new UnsupportedBlockException(value.id(), delta.x(), delta.y(), delta.z());
             }
         }
@@ -273,7 +265,7 @@ public final class FabricWorldAccess {
                 case BLOCK -> {
                     for (EditValue value : new EditValue[] {delta.before(), delta.after()}) {
                         var state = mapping.nativeState(value.id());
-                        if (!SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
+                        if (!LifecycleDeclarations.supports(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
                             throw new UnsupportedBlockException(value.id(), delta.x(), delta.y(), delta.z());
                         }
                         if (value.nbt() != null && !state.hasBlockEntity()) {
@@ -338,8 +330,9 @@ public final class FabricWorldAccess {
         Set<Integer> checked = new HashSet<>();
         for (EditDelta delta : deltas) {
             if (delta.kind() != EditDelta.Kind.BLOCK) return false;
-            if (mapping.nativeState(delta.before().id()).hasBlockEntity()
-                    || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+            var before = mapping.nativeState(delta.before().id());
+            var after = mapping.nativeState(delta.after().id());
+            if (before.hasBlockEntity() || after.hasBlockEntity() || !directSafe(before) || !directSafe(after)) {
                 return false;
             }
             if (chunk == null) {
@@ -350,7 +343,7 @@ public final class FabricWorldAccess {
             int sectionY = delta.y() >> 4;
             if (!checked.add(sectionY)) continue;
             var section = chunk.getSection(chunk.getSectionIndex(delta.y()));
-            if (section.maybeHas(state -> !minecraftNamespace(state))) return false;
+            if (section.maybeHas(state -> !directSafe(state))) return false;
         }
         return true;
     }
@@ -398,7 +391,7 @@ public final class FabricWorldAccess {
             }
             LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
             var section = chunk.getSection(chunk.getSectionIndex(first.y()));
-            if (section.maybeHas(state -> !minecraftNamespace(state))) {
+            if (section.maybeHas(state -> !directSafe(state))) {
                 throw new IllegalStateException("Direct-section route lost section eligibility");
             }
             FabricSectionPublication.install(level, chunk, deltas, mapping, optimizations, effects);
@@ -408,7 +401,8 @@ public final class FabricWorldAccess {
                 && !mapping.nativeState(first.after().id()).hasBlockEntity()) {
             LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
             var section = chunk.getSection(chunk.getSectionIndex(first.y()));
-            if (section.maybeHas(state -> !minecraftNamespace(state))) {
+            if (section.maybeHas(state -> !directSafe(state)) || deltas.stream().anyMatch(delta ->
+                    !directSafe(mapping.nativeState(delta.before().id())) || !directSafe(mapping.nativeState(delta.after().id())))) {
                 for (EditDelta delta : deltas) {
                     write(level, delta, effects);
                     fallbackWrites++;
@@ -513,7 +507,7 @@ public final class FabricWorldAccess {
             var target = mapping.nativeState(delta.after().id());
             var valid = Block.updateFromNeighbourShapes(target, level, pos);
             if (valid != target
-                    && SUPPORTED_BLOCKS.contains(BuiltInRegistries.BLOCK.getKey(valid.getBlock()).toString())) {
+                    && LifecycleDeclarations.supports(BuiltInRegistries.BLOCK.getKey(valid.getBlock()).toString())) {
                 var corrected = FabricAdapter.adapt(valid);
                 block = valid.getBlock() == target.getBlock() && block.getNbtReference() != null
                         ? corrected.toBaseBlock(block.getNbtReference()) : corrected.toBaseBlock();
@@ -573,8 +567,9 @@ public final class FabricWorldAccess {
         }
     }
 
-    private static boolean minecraftNamespace(net.minecraft.world.level.block.state.BlockState state) {
-        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("minecraft");
+    // Whether a block may be installed into a section directly: no mod hook is skipped for it.
+    private static boolean directSafe(net.minecraft.world.level.block.state.BlockState state) {
+        return LifecycleDeclarations.directSafe(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     // Workers may only use detached snapshots; even a loaded live read is forbidden.

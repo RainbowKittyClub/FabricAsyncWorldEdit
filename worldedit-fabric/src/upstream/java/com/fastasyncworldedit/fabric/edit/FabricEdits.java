@@ -67,6 +67,9 @@ public final class FabricEdits {
     public static void initialize() {
         FabricRegionCommands.initialize();
         FabricChunkTickets.register();
+        // Mods' lifecycle declarations name tags, which are bound only once the server has loaded them.
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> LifecycleDeclarations.refresh());
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> LifecycleDeclarations.refresh());
         ServerLifecycleEvents.START_DATA_PACK_RELOAD.register((server, resources) -> {
             if (active != null && active.server == server) {
                 active.preparation.reload(true);
