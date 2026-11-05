@@ -242,15 +242,15 @@
       "bytes": 26652008,
       "nested": []
     },
-    "assetsRoot": "/home/kgadberry/.gradle/caches/fabric-loom/assets",
+    "assetsRoot": "/home/kgadberry/.cache/fawe/assets-pinned",
     "assetIndex": {
-      "path": "/home/kgadberry/.gradle/caches/fabric-loom/assets/indexes/26.3-34.json",
+      "path": "/home/kgadberry/.cache/fawe/assets-pinned/indexes/26.3-34.json",
       "sha256": "46fc3ca895e015637f6a766911dbf8de5d75bd87d0a007e2881cb4710e81cd19",
       "bytes": 597035
     },
     "metadataAssetIndexSha1": "917ff6d74b9f635c46bac0d28857206bbcc1ffe4",
     "cachedAssetIndexSha1": "917ff6d74b9f635c46bac0d28857206bbcc1ffe4",
-    "assetIndexPolicy": "Cached index matches pinned version metadata; all 5147 cached objects verified by size and SHA1. No download or shared-cache write.",
+    "assetIndexPolicy": "Pinned index restored by content address into a private root with hardlinks of the Gradle cache objects; Loom refreshing its own cached index does not touch it.",
     "assetIndexName": "26.3-34",
     "assetCount": 5147,
     "libraries": [
@@ -1429,9 +1429,8 @@
       "nested": []
     },
     "sensible-storage": {
-      "path": "/mnt/WORKSPACE/minecraft-server-data/felis-novum/mods/sensiblestorage-0.6.1+26.3.jar",
-      "bytes": 1871836,
-      "sha256": "f93650bb9c0b8157e7a066047305c5e8de07f1e6ba4ad3b2bd43820c76648346",
+      "path": "/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-lifecycle/sensiblestorage-0.6.1+26.3.jar",
+      "sha256": "b65ca8813796b047a863710ccf3b043747bcfa8b8159bca0ebd145dbe3fbf7aa",
       "nested": []
     },
     "player-portals": {
@@ -1775,7 +1774,7 @@
     },
     "candidate": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "d7ac629cf69d7bc4676ca8bcf1d4014e557bb45f9bce63d2cedf0d804a83fcad",
+      "sha256": "58050613f965fac3c90bc3d8194bb25d23b7c59dc9903802a13528654541c46c",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
@@ -1833,7 +1832,7 @@
     },
     "lifecycle-probe": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "b4e8c6d76c09789292a6103e808cc59937c9d7a6c254afb6451464d16855f9eb",
+      "sha256": "1c5ed4a95c807394e4f064f19f293e1155cdfd4576307e119c0ddf1eac2305d3",
       "nested": []
     },
     "ledger-rkc": {

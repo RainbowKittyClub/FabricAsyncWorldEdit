@@ -17,6 +17,18 @@ def pin(path):
 
 manifest = json.loads((root / 'test/s10/manifest.json').read_text())
 manifest['runLabel'] = 'fawe-fast-editing-20261029-s11'
+# The pinned asset index lives in a root of its own: Fabric Loom swaps the one in its cache for Mojang's
+# live index whenever a mod's datagen client runs, which invalidates the pin. The index is the cached
+# one's exact bytes (restored by content address, sha1 below) and the objects are hardlinks of Loom's.
+assets_root = Path.home() / '.cache/fawe/assets-pinned'
+index = (assets_root / 'indexes/26.3-34.json').resolve(strict=True)
+if hashlib.sha1(index.read_bytes()).hexdigest() != manifest['minecraft']['cachedAssetIndexSha1']:
+    raise RuntimeError('The private asset index is not the one the earlier stages pinned')
+manifest['minecraft']['assetsRoot'] = str(assets_root)
+manifest['minecraft']['assetIndex'] = {'path': str(index), 'sha256': hashlib.sha256(index.read_bytes()).hexdigest(),
+                                       'bytes': index.stat().st_size}
+manifest['minecraft']['assetIndexPolicy'] = ('Pinned index restored by content address into a private root with hardlinks of '
+                                             'the Gradle cache objects; Loom refreshing its own cached index does not touch it.')
 deps = manifest['availableDependencies']
 for key, suffix in [('candidate', 'dist'), ('lifecycle-probe', 'testmod')]:
     jars = list((root / 'worldedit-fabric/build/libs').glob(f'*-{suffix}.jar'))
@@ -55,6 +67,10 @@ deps['diagonal-walls'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/a
 # that one field, built from the mod's 26.3 node.
 deps['player-portals'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/player-portals-fawe-lifecycle/'
                                   'playerportals-0.2.0+26.3.jar'))
+# Sensible storage with its fawe:lifecycle declaration (feat/fawe-lifecycle): the staged 0.6.1 jar plus
+# the planked-chest tag and that one field, built from the mod's 26.3 node after its datagen.
+deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-lifecycle/'
+                                    'sensiblestorage-0.6.1+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
