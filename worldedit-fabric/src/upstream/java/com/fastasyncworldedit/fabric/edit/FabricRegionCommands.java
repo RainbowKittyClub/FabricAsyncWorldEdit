@@ -68,10 +68,10 @@ public final class FabricRegionCommands {
                                         + " recorded and undoable."), false);
                         return cancelled;
                     }))
-                    .then(Commands.literal("set").then(Commands.argument("state", StringArgumentType.word())
+                    .then(Commands.literal("set").then(Commands.argument("state", StringArgumentType.string())
                             .executes(command -> submit(command.getSource(), null, StringArgumentType.getString(command, "state")))))
-                    .then(Commands.literal("replace").then(Commands.argument("before", StringArgumentType.word())
-                            .then(Commands.argument("state", StringArgumentType.word()).executes(command -> submit(
+                    .then(Commands.literal("replace").then(Commands.argument("before", StringArgumentType.string())
+                            .then(Commands.argument("state", StringArgumentType.string()).executes(command -> submit(
                                     command.getSource(), StringArgumentType.getString(command, "before"),
                                     StringArgumentType.getString(command, "state")))))));
         });
