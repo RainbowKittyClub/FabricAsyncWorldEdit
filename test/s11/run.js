@@ -80,6 +80,13 @@ async function main () {
       ...hooks,
       async configureServer (serverDir) {
         await hooks.configureServer?.(serverDir)
+        // Ledger's own first start races on writing its default config (as Felis Novum's staging
+        // notes); deployments preseed it, so every Ledger profile does.
+        const config = path.join(serverDir, 'config/ledger.toml')
+        if (manifest.profiles[profile].includes('ledger-rkc') && !fs.existsSync(config)) {
+          fs.mkdirSync(path.dirname(config), { recursive: true })
+          fs.writeFileSync(config, `${tool('unzip', ['-p', manifest.availableDependencies['ledger-rkc'].path, 'ledger.toml']).trimEnd()}\n`)
+        }
         if (database) writeExtensionConfig(serverDir, manifest, database)
       },
       async restart (...args) {
