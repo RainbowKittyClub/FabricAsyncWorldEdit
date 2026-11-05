@@ -51,6 +51,10 @@ deps['polymer-accepted'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence
 # Diagonal walls with its fawe:lifecycle declaration (feat/fawe-lifecycle), built from the mod's 26.3 node.
 deps['diagonal-walls'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/diagonal-walls-fawe-lifecycle/'
                                   'polymerdiagonalwalls-0.1.1+26.3.jar'))
+# Player portals with its fawe:lifecycle declaration (feat/fawe-lifecycle): the staged 0.2.0 jar plus
+# that one field, built from the mod's 26.3 node.
+deps['player-portals'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/player-portals-fawe-lifecycle/'
+                                  'playerportals-0.2.0+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
