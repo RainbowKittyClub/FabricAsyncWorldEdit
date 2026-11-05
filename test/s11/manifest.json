@@ -2544,17 +2544,13 @@
     ]
   },
   "unavailableProfiles": [
-    "backend-db",
-    "claims",
-    "full",
-    "paper",
-    "vanilla-light"
+    "paper"
   ],
   "unresolved": [
     "Bridge-specific permissions/audit consumers and profile suites belong to S6-S14",
     "Staged Polymer 0.18.5-rkc.4 does not equal the 0.18.6 research reference",
     "The packaged candidate and non-shipped probe are pinned by pin-candidate.py",
-    "Paper 26.3 and isolated database-extension profile not provisioned"
+    "Paper 26.3 is not provisioned"
   ],
   "targets": {
     "wnaSpeedup": 5,

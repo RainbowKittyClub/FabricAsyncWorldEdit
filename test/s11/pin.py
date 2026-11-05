@@ -64,6 +64,11 @@ deps['ledger-databases'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence
                                     'ledger-databases-1.2.2.jar'))
 for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
     manifest['profiles'][f'{suite}-backend-db'] = [*manifest['profiles'][f'{suite}-full'], 'ledger-databases']
+# These profiles now run; only Paper, the throughput reference, is still to provision.
+manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles']
+                                   if name not in ('claims', 'full', 'vanilla-light', 'backend-db')]
+manifest['unresolved'] = [('Paper 26.3 is not provisioned' if line.startswith('Paper 26.3') else line)
+                          for line in manifest['unresolved']]
 # The S8 audit and S10 replay lanes run from this manifest too (`s8/run.js backend-db`).
 for lane in ('audit', 'replay'):
     manifest['profiles'][f'{lane}-backend-db'] = [*manifest['profiles'][lane], 'ledger-databases']
