@@ -7,6 +7,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { Rig, SingleLaneLease, admitResources, RESOURCE_POLICY, writeJson, verify, hash, tool, GateError } = require('../harness/rig')
 const { smoke } = require('../harness/smoke')
+const { startPostgres, stopPostgres, writeExtensionConfig } = require('../harness/postgres')
+const { sqliteReader, postgresReader } = require('../harness/ledgerdb')
 const repo = path.resolve(__dirname, '../..')
 const workspace = '/home/kgadberry/projects/minecraft-dev'
 const manifestFile = path.join(__dirname, 'manifest.json')
@@ -23,7 +25,7 @@ async function main () {
   fs.mkdirSync(evidence, { recursive: true })
   const recordFile = path.join(evidence, `s11-${profile}-${Date.now()}.json`)
   const report = { accepted: false, suite: 's11', profile, resourcePolicy: RESOURCE_POLICY, samples: [], checks: [] }
-  let rig, lease, problem
+  let rig, lease, problem, database
   try {
     for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])
     for (const input of [...manifest.minecraft.libraries, ...manifest.loader.libraries]) verify(input)
@@ -35,7 +37,7 @@ async function main () {
     for (const binary of ['java', 'javac', 'jar', 'Xvfb', 'xauth', 'vulkaninfo']) tool('sh', ['-c', 'command -v "$1"', 'sh', binary])
     if (!process.env.TMPDIR || !process.env.VK_DRIVER_FILES || !fs.existsSync(process.env.VK_DRIVER_FILES)) throw new GateError('Use pinned Nix shell', 2)
     report.sourceHashes = Object.fromEntries(['test/s11/run.js', `test/s11/${suite}.js`, 'test/s11/common.js', 'test/s11/pin.py',
-      'test/harness/smoke.js', 'test/harness/native.js']
+      'test/harness/smoke.js', 'test/harness/native.js', 'test/harness/postgres.js', 'test/harness/ledgerdb.js']
       .map(name => [name, hash(path.join(repo, name))]))
     lease = new SingleLaneLease()
     const admission = await admitResources({ samples: report.samples })
@@ -66,11 +68,20 @@ async function main () {
     // With Ledger loaded a unit finishes only once its rows are durable, and a cell changed after the
     // snapshot conflicts (Ledger needs the exact before-value), so pacing and conflicts differ.
     const ledgered = manifest.profiles[profile].includes('ledger-rkc')
-    const hooks = require(SUITES[suite])({ rig, check, paced, GateError, claimed, ledgered })
+    // backend-db: Ledger runs on its Postgres extension against a disposable container; every other
+    // profile reads the world's SQLite file.
+    if (manifest.profiles[profile].includes('ledger-databases')) database = await startPostgres(rig)
+    const ledgerDb = database ? postgresReader(database) : sqliteReader(path.join(rig.root, 'server/world/ledger.sqlite'))
+    report.database = database ? { kind: 'postgres', image: 'postgres:18-alpine', container: database.name, port: database.port } : { kind: 'sqlite' }
+    const hooks = require(SUITES[suite])({ rig, check, paced, GateError, claimed, ledgered, ledgerDb })
     await smoke(rig, repo, workspace, profile, undefined, {
       jvmArgs: ['-Dfawe.experimental.coordinated=true'],
       restartClient: true,
       ...hooks,
+      async configureServer (serverDir) {
+        await hooks.configureServer?.(serverDir)
+        if (database) writeExtensionConfig(serverDir, manifest, database)
+      },
       async restart (...args) {
         await hooks.restart(...args)
         const failed = report.checks.filter(entry => !entry.passed).map(entry => entry.name)
@@ -90,6 +101,7 @@ async function main () {
       }
       report.processes = rig.children.map(({ child, ...entry }) => entry)
     }
+    try { stopPostgres(database, rig && path.join(rig.root, 'postgres.log')) } catch (error) { problem ||= error }
     if (!rig || rig.children.every(entry => entry.stopped)) lease?.close()
     report.leaseReleased = !lease || lease.closed
     report.error = problem?.stack

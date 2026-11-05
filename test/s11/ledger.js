@@ -1,11 +1,11 @@
 'use strict'
 
 // S11 ledger suite: every edit route against the RKC Ledger fork, checked by reading Ledger's own
-// SQLite file directly, beside an independent expected world, before and after a restart.
+// database directly (the world's SQLite file, or Postgres for backend-db), beside an independent
+// expected world, before and after a restart.
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { DatabaseSync } = require('node:sqlite')
 const { probe, differences, delta } = require('./common')
 const { tool } = require('../harness/rig')
 
@@ -13,8 +13,8 @@ const NATIVE_STAGES = ['snapshot', 'admitted', 'prepared', 'authorized', 'publis
 const BULK_STAGES = ['ticket', ...NATIVE_STAGES]
 const ROUTES = [['native', 'PLAYER'], ['native', 'API'], ['bulk', 'PLAYER'], ['bulk', 'API']]
 const AREA = 'forceload add 6800 6800 6895 6863'
-const ROWS = `SELECT a.id, ai.action_identifier AS action, a.x, a.y, a.z, a.rolled_back AS rolledBack,
-  o.identifier AS object, oo.identifier AS oldObject, s.name AS source, p.player_name AS player, a.extra_data AS extra
+const ROWS = `SELECT a.id, ai.action_identifier AS action, a.x, a.y, a.z, a.rolled_back AS "rolledBack",
+  o.identifier AS object, oo.identifier AS "oldObject", s.name AS source, p.player_name AS player, a.extra_data AS extra
   FROM actions a JOIN ActionIdentifiers ai ON ai.id = a.action_id JOIN ObjectIdentifiers o ON o.id = a.object_id
   JOIN ObjectIdentifiers oo ON oo.id = a.old_object_id JOIN sources s ON s.id = a.source
   LEFT JOIN players p ON p.id = a.player_id`
@@ -51,15 +51,10 @@ const CASES = [
   { name: 'changed', box: CHANGED, expect: () => 'minecraft:glowstone' }
 ]
 
-module.exports = ({ rig, check, paced }) => {
-  const dbFile = path.join(rig.root, 'server/world/ledger.sqlite')
+module.exports = ({ rig, check, paced, ledgerDb }) => {
   const outboxDir = path.join(rig.root, 'server/world/fawe/ledger-outbox')
   const ledgerConfig = path.join(rig.root, 'server/config/ledger.toml')
-  // A WAL reader can still meet a brief lock while Ledger checkpoints; wait it out.
-  const query = (sql, ...params) => {
-    const db = new DatabaseSync(dbFile, { readOnly: true, timeout: 10000 })
-    try { return db.prepare(sql).all(...params) } finally { db.close() }
-  }
+  const { query } = ledgerDb
   const faweRows = ([x1, y1, z1, x2, y2, z2]) => query(`${ROWS} WHERE ai.action_identifier LIKE 'fawe-%'
     AND a.x BETWEEN ? AND ? AND a.y BETWEEN ? AND ? AND a.z BETWEEN ? AND ? ORDER BY a.id`, x1, x2, y1, y2, z1, z2)
   const allFaweRows = () => query(`${ROWS} WHERE ai.action_identifier LIKE 'fawe-%'`).length
@@ -70,7 +65,16 @@ module.exports = ({ rig, check, paced }) => {
     rows.every(row => row.action === 'fawe-block' && row.source === 'fawe' && row.player === name &&
       row.oldObject === 'minecraft:air' && row.object === block)
   const summary = rows => ({ rows: rows.length, unique: unique(rows), sample: rows.slice(0, 2) })
-  const withoutBook = text => text.replace(/\n*\[book\][^[]*/, '')
+  // Drops the [book] section and nothing else: its lines end at the next table header.
+  const withoutBook = text => {
+    const kept = []
+    let inBook = false
+    for (const line of text.split('\n')) {
+      if (/^\[[^\]]+\]\s*$/.test(line)) inBook = line.trim() === '[book]'
+      if (!inBook) kept.push(line)
+    }
+    return kept.join('\n')
+  }
   const verifyAll = async (send, suffix) => {
     for (const entry of CASES) {
       const wrong = await differences(send, entry)

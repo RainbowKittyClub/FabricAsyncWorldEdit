@@ -9,17 +9,21 @@ const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const { Rig, SingleLaneLease, admitResources, RESOURCE_POLICY, writeJson, verify, hash, tool, GateError } = require('../harness/rig')
 const { smoke } = require('../harness/smoke')
+const { startPostgres, stopPostgres, writeExtensionConfig, outage } = require('../harness/postgres')
+const { sqliteReader, postgresReader } = require('../harness/ledgerdb')
 const repo = path.resolve(__dirname, '../..')
 const workspace = '/home/kgadberry/projects/minecraft-dev'
-const manifestFile = path.join(__dirname, 'manifest.json')
+// `run.js backend-db` runs the lane on Ledger's Postgres extension; the S11 manifest pins that profile.
+const backendDb = process.argv[2] === 'backend-db'
+const manifestFile = path.join(__dirname, backendDb ? '../s11/manifest.json' : 'manifest.json')
 const manifest = JSON.parse(fs.readFileSync(manifestFile))
 const evidence = '/mnt/WORKSPACE/scratchpad/fawe-s8-evidence'
-const profile = 'audit'
+const profile = backendDb ? 'audit-backend-db' : 'audit'
 // Small enough that four 2048-cell edits fill the producer queue while Ledger is stalled.
 const LEDGER_LIMITS = 'producerMaxBatchActions = 4096\nproducerMaxPendingActions = 8192\nproducerMaxPendingBatches = 64\n'
 
 const ROWS = `SELECT a.id, ai.action_identifier AS action, a.x, a.y, a.z, w.identifier AS world,
-  o.identifier AS object, oo.identifier AS oldObject, a.block_state AS state, a.old_block_state AS oldState,
+  o.identifier AS object, oo.identifier AS "oldObject", a.block_state AS state, a.old_block_state AS "oldState",
   s.name AS source, p.player_name AS player, a.extra_data AS extra
   FROM actions a JOIN ActionIdentifiers ai ON ai.id = a.action_id JOIN worlds w ON w.id = a.world_id
   JOIN ObjectIdentifiers o ON o.id = a.object_id JOIN ObjectIdentifiers oo ON oo.id = a.old_object_id
@@ -38,17 +42,11 @@ async function pollResult (rig, audit, key, liveness = []) {
   return value
 }
 
-// A WAL reader can still meet a brief lock while Ledger opens or checkpoints; wait it out.
-function query (dbFile, sql, ...params) {
-  const db = new DatabaseSync(dbFile, { readOnly: true, timeout: 10000 })
-  try { return db.prepare(sql).all(...params) } finally { db.close() }
-}
-
 async function main () {
   fs.mkdirSync(evidence, { recursive: true })
-  const recordFile = path.join(evidence, `s8-${Date.now()}.json`)
+  const recordFile = path.join(evidence, `s8${backendDb ? '-backend-db' : ''}-${Date.now()}.json`)
   const report = { accepted: false, suite: 's8-audit', profile, resourcePolicy: RESOURCE_POLICY, samples: [], checks: [] }
-  let rig, lease, problem
+  let rig, lease, problem, database
   try {
     for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])
     for (const input of [...manifest.minecraft.libraries, ...manifest.loader.libraries]) verify(input)
@@ -59,14 +57,20 @@ async function main () {
     if (!/^eula=true\s*$/m.test(fs.readFileSync(verify(manifest.eula), 'utf8'))) throw new GateError('Authorized EULA missing', 2)
     for (const binary of ['java', 'javac', 'jar', 'unzip', 'Xvfb', 'xauth', 'vulkaninfo']) tool('sh', ['-c', 'command -v "$1"', 'sh', binary])
     if (!process.env.TMPDIR || !process.env.VK_DRIVER_FILES || !fs.existsSync(process.env.VK_DRIVER_FILES)) throw new GateError('Use pinned Nix shell', 2)
-    report.sourceHashes = Object.fromEntries(['test/s8/run.js', 'test/s8/pin.py'].map(name => [name, hash(path.join(repo, name))]))
+    report.sourceHashes = Object.fromEntries(['test/s8/run.js', 'test/s8/pin.py', 'test/harness/postgres.js', 'test/harness/ledgerdb.js']
+      .map(name => [name, hash(path.join(repo, name))]))
     lease = new SingleLaneLease()
     const admission = await admitResources({ samples: report.samples })
-    rig = new Rig('/mnt/WORKSPACE/scratchpad/fawe/fawe-fast-editing-20261029-s8', manifest, manifestFile, admission)
+    rig = new Rig(`/mnt/WORKSPACE/scratchpad/fawe/fawe-fast-editing-20261029-s8${backendDb ? '-backend-db' : ''}`,
+      manifest, manifestFile, admission)
     report.admission = admission
     report.root = rig.root
     console.log(JSON.stringify({ root: rig.root }))
     const dbFile = path.join(rig.root, 'server/world/ledger.sqlite')
+    if (backendDb) database = await startPostgres(rig)
+    const ledgerDb = database ? postgresReader(database) : sqliteReader(dbFile)
+    const { query } = ledgerDb
+    report.database = database ? { kind: 'postgres', image: 'postgres:18-alpine', container: database.name, port: database.port } : { kind: 'sqlite' }
     const check = (name, condition, detail) => {
       report.checks.push({ name, passed: Boolean(condition), detail })
       if (!condition) throw new GateError(`${name}: ${JSON.stringify(detail)}`)
@@ -83,7 +87,7 @@ async function main () {
       intent: fs.readFileSync(unitFile(outboxDir, id, 'intent'), 'utf8'),
       receipt: fs.existsSync(unitFile(outboxDir, id, 'receipt')) ? fs.readFileSync(unitFile(outboxDir, id, 'receipt'), 'utf8') : null
     })
-    const opRows = operation => query(dbFile, `${ROWS} WHERE ai.action_identifier = 'fawe-block'`)
+    const opRows = operation => query(`${ROWS} WHERE ai.action_identifier = 'fawe-block'`)
       .filter(row => JSON.parse(row.extra).operation === operation)
     // Units the contract leaves journaled for the restart checks.
     const held = {}
@@ -95,6 +99,7 @@ async function main () {
         if (!defaults.includes('[database]\n')) throw new GateError('Ledger default config changed shape', 2)
         fs.mkdirSync(path.join(serverDir, 'config'), { recursive: true })
         fs.writeFileSync(path.join(serverDir, 'config/ledger.toml'), defaults.replace('[database]\n', `[database]\n${LEDGER_LIMITS}`))
+        if (database) writeExtensionConfig(serverDir, manifest, database)
       },
       async contract (rig, send, name, { client, chatCommand: sendChatCommand, expected }) {
         let lastCommandTick
@@ -116,8 +121,8 @@ async function main () {
           await chatCommand(`/pos1 ${x1},${y1},${z1}`, /First position set|Position already set/)
           await chatCommand(`/pos2 ${x2},${y2},${z2}`, /Second position set|Position already set/)
         }
-        const faweRows = () => query(dbFile, `${ROWS} WHERE ai.action_identifier LIKE 'fawe-%' ORDER BY a.id`)
-        const receipts = () => query(dbFile, 'SELECT producer, operation_id AS operation, sequence, payload_hash AS hash, batch_id AS batch, action_id AS action FROM producer_receipts ORDER BY id')
+        const faweRows = () => query(`${ROWS} WHERE ai.action_identifier LIKE 'fawe-%' ORDER BY a.id`)
+        const receipts = () => query('SELECT producer, operation_id AS operation, sequence, payload_hash AS hash, batch_id AS batch, action_id AS action FROM producer_receipts ORDER BY id')
           .map(row => ({ ...row, operation: uuidOf(row.operation) }))
         const extraOf = row => JSON.parse(row.extra)
 
@@ -126,7 +131,7 @@ async function main () {
         await send('fill 3199 79 3199 3210 79 3201 minecraft:stone')
         await send('fill 3200 80 3200 3209 80 3200 minecraft:air')
         const before = { fawe: faweRows().length, receipts: receipts().length }
-        const ordinaryAt = (x1, x2, z) => query(dbFile,
+        const ordinaryAt = (x1, x2, z) => query(
           `${ROWS} WHERE ai.action_identifier NOT LIKE 'fawe-%' AND a.x BETWEEN ? AND ? AND a.y = 80 AND a.z = ?`, x1, x2, z).length
         // Ledger's ordinary queue commits every 10 ticks; let it settle before counting.
         const settle = () => new Promise(resolve => setTimeout(resolve, 3000))
@@ -190,14 +195,14 @@ async function main () {
           faweRows().length === preRetry.fawe && receipts().length === preRetry.receipts, { captured, redelivered })
         const started = await audit('contract')
         const contract = await result('contract')
-        const testRows = query(dbFile, `${ROWS} WHERE s.name = 'fawe-test'`)
+        const testRows = query(`${ROWS} WHERE s.name = 'fawe-test'`)
         check('ledger-contract', JSON.stringify(contract.result?.first?.accepted) === '[0,1]' &&
           contract.result?.retry?.accepted?.length === 0 && JSON.stringify(contract.result?.retry?.duplicates) === '[0,1]' &&
           contract.result?.conflict === 'CONFLICT' && contract.receipts === 2 && testRows.length === 2 &&
           testRows.every(row => row.object === 'minecraft:stone'), { started, contract, testRows })
 
         // 5. Ordinary Ledger logging still works beside the bridge.
-        const ordinary = () => query(dbFile, `${ROWS} WHERE a.x = 3209 AND a.y = 80 AND a.z = 3200 AND ai.action_identifier NOT LIKE 'fawe-%'`).length
+        const ordinary = () => query(`${ROWS} WHERE a.x = 3209 AND a.y = 80 AND a.z = 3200 AND ai.action_identifier NOT LIKE 'fawe-%'`).length
         const preOrdinary = ordinary()
         await chatCommand('setblock 3209 80 3200 minecraft:gold_block', /Changed the block/)
         await rig.wait('ordinary Ledger row', () => ordinary() > preOrdinary, 30000, [client.entry])
@@ -257,7 +262,7 @@ async function main () {
         for (let index = 0; index < 8; index++) await expected(cell(index), 80, 3200, 'minecraft:stone')
         await expected(cell(8), 80, 3200, 'minecraft:air')
         check('fawe-admission-drained', faweRows().length === preStall + 8 * 4 &&
-          query(dbFile, `${ROWS} WHERE a.x BETWEEN ? AND ? AND ai.action_identifier = 'fawe-block'`, cell(8), cell(8) + 3).length === 0,
+          query(`${ROWS} WHERE a.x BETWEEN ? AND ? AND ai.action_identifier = 'fawe-block'`, cell(8), cell(8) + 3).length === 0,
           { rows: faweRows().length - preStall })
 
         // 7c. Denied: chunk 200,200 is claimed for a stranger. An edit across chunks 199 and 200 writes
@@ -271,7 +276,7 @@ async function main () {
         for (let x = 3200; x <= 3203; x++) await expected(x, 80, 3212, 'minecraft:air')
         let allowedStone = 0
         for (let x = 3196; x <= 3199; x++) if ((await send(`execute if block ${x} 80 3212 minecraft:stone`)) === 'Test passed') allowedStone++
-        const fawe3212 = (x1, x2) => query(dbFile, `${ROWS} WHERE ai.action_identifier = 'fawe-block' AND a.x BETWEEN ? AND ? AND a.z = 3212`, x1, x2).length
+        const fawe3212 = (x1, x2) => query(`${ROWS} WHERE ai.action_identifier = 'fawe-block' AND a.x BETWEEN ? AND ? AND a.z = 3212`, x1, x2).length
         check('denied-no-rows', fawe3212(3200, 3203) === 0 && fawe3212(3196, 3199) === allowedStone &&
           receipts().length - preDenied === allowedStone,
           { deniedRows: fawe3212(3200, 3203), allowedRows: fawe3212(3196, 3199), allowedStone, keys: receipts().length - preDenied })
@@ -318,12 +323,20 @@ async function main () {
         const outageRows = opRows(outageIntent.origin.operation)
         check('db-outage-drained', outageRows.length === 4 && outageRows.every(row => row.player === name), outageRows)
 
-        // 10b. A real database outage: this test holds SQLite's write lock, so Ledger's commit fails busy
-        // and Ledger retries; the unit stays journaled with no rows until the lock is released.
+        // 10b. A real database outage: on SQLite this test holds the write lock, so Ledger's commit fails
+        // busy; on Postgres Ledger's role may not log in and its sessions are ended. Ledger retries, and
+        // the unit stays journaled with no rows until the database is back.
         await send('fill 3352 80 3206 3355 80 3206 minecraft:air')
         const preLock = faweRows().length
-        const lock = new DatabaseSync(dbFile, { timeout: 10000 })
-        lock.exec('BEGIN IMMEDIATE')
+        let release
+        if (database) {
+          outage(database, true)
+          release = () => outage(database, false)
+        } else {
+          const lock = new DatabaseSync(dbFile, { timeout: 10000 })
+          lock.exec('BEGIN IMMEDIATE')
+          release = () => { lock.exec('ROLLBACK'); lock.close() }
+        }
         try {
           await select(3352, 80, 3206, 3355, 80, 3206)
           await chatCommand('fawe-coordinated set stone', /Coordinated edit admitted/)
@@ -333,8 +346,7 @@ async function main () {
           check('db-lock-held', faweRows().length === preLock && unitsIn(outboxDir).length === 1,
             { rows: faweRows().length - preLock, units: unitsIn(outboxDir) })
         } finally {
-          lock.exec('ROLLBACK')
-          lock.close()
+          release()
         }
         const released = Date.now()
         await rig.wait('rows committed after the lock', () => faweRows().length === preLock + 4 && unitsIn(outboxDir).length === 0,
@@ -382,9 +394,9 @@ async function main () {
         held.overwritten = craft(3368, true)
         for (const kind of ['intent', 'receipt']) fs.writeFileSync(unitFile(outboxDir, held.acknowledged.id, kind), held.acknowledged[kind])
         report.beforeRestart = {
-          rows: query(dbFile, 'SELECT count(*) AS n FROM actions')[0].n,
-          receipts: query(dbFile, 'SELECT count(*) AS n FROM producer_receipts')[0].n,
-          batches: query(dbFile, 'SELECT count(*) AS n FROM producer_batches')[0].n,
+          rows: query('SELECT count(*) AS n FROM actions')[0].n,
+          receipts: query('SELECT count(*) AS n FROM producer_receipts')[0].n,
+          batches: query('SELECT count(*) AS n FROM producer_batches')[0].n,
           units: unitsIn(outboxDir)
         }
       },
@@ -399,9 +411,9 @@ async function main () {
         const pending = JSON.parse(held.pending.intent).origin.operation
         const acknowledged = JSON.parse(held.acknowledged.intent).origin.operation
         const after = {
-          receipts: query(dbFile, 'SELECT count(*) AS n FROM producer_receipts')[0].n,
-          batches: query(dbFile, 'SELECT count(*) AS n FROM producer_batches')[0].n,
-          schema: query(dbFile, "SELECT version FROM ledger_schema_versions WHERE component = 'producer_batches'")
+          receipts: query('SELECT count(*) AS n FROM producer_receipts')[0].n,
+          batches: query('SELECT count(*) AS n FROM producer_batches')[0].n,
+          schema: query("SELECT version FROM ledger_schema_versions WHERE component = 'producer_batches'")
         }
         check('restart-keys-kept', after.receipts === report.beforeRestart.receipts + 4 &&
           after.batches === report.beforeRestart.batches + 1 && after.schema.length === 1 && after.schema[0].version === 1,
@@ -436,6 +448,7 @@ async function main () {
       }
       report.processes = rig.children.map(({ child, ...entry }) => entry)
     }
+    try { stopPostgres(database, rig && path.join(rig.root, 'postgres.log')) } catch (error) { problem ||= error }
     if (!rig || rig.children.every(entry => entry.stopped)) lease?.close()
     report.leaseReleased = !lease || lease.closed
     report.error = problem?.stack

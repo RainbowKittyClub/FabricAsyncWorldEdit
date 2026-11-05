@@ -42,11 +42,15 @@ const chunksOf = ([x1, , z1, x2, , z2]) => {
 }
 const cellCount = ([x1, y1, z1, x2, y2, z2]) => (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
 
-module.exports = ({ rig, check, paced, ledgered }) => {
+module.exports = ({ rig, check, paced, ledgered, ledgerDb }) => {
   // Strict: one publication on every tick. With Ledger a unit finishes only once its rows are
   // durable, so a chunk's next unit and the admission window wait for that: the bound is at most
-  // one unit a tick and the run done within twice as many ticks as units.
-  const inOrder = entry => ledgered ? entry.distinct && entry.span <= 2 * entry.units : entry.consecutive
+  // one unit a tick and, on SQLite, the run done within twice as many ticks as units. Postgres
+  // takes a round trip per action row (measured by the lane's statement statistics), so there only
+  // the order is bound and the finish time is recorded against a ceiling.
+  const postgres = ledgerDb?.kind === 'postgres'
+  const inOrder = entry => postgres ? entry.distinct
+    : ledgered ? entry.distinct && entry.span <= 2 * entry.units : entry.consecutive
   const noIdle = (before, after) => ledgered || before === after
   const CASES = [
     { name: 'set16-undone', box: SET16, expect: () => undefined },
@@ -165,6 +169,8 @@ module.exports = ({ rig, check, paced, ledgered }) => {
       check('wide-consecutive', wide.units === 8 && wide.applied === cellCount(WIDE) && inOrder(wide) &&
         noIdle(timing.idleWithPending, afterWide.idleWithPending) && wide.outcomes.join() === 'COMPLETE',
       { ...wide, own: undefined, idle: afterWide.idleWithPending - timing.idleWithPending, ...lags(timing, afterWide) })
+      // The durable record is what paces the rest, so a stall in it must still fail the lane.
+      if (ledgered) check('ledger-finish-bounded', lags(timing, afterWide).maxFinishMs < 10000, lags(timing, afterWide))
 
       // Neighbour updates on: one unit per chunk as without them, the callbacks after its writes.
       await chatCommand('/perf neighbors on', /set to|is already/)

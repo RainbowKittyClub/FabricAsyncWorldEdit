@@ -6,30 +6,28 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { DatabaseSync } = require('node:sqlite')
 const { Rig, SingleLaneLease, admitResources, RESOURCE_POLICY, writeJson, verify, hash, tool, GateError } = require('../harness/rig')
 const { smoke } = require('../harness/smoke')
+const { startPostgres, stopPostgres, writeExtensionConfig } = require('../harness/postgres')
+const { sqliteReader, postgresReader } = require('../harness/ledgerdb')
 const repo = path.resolve(__dirname, '../..')
 const workspace = '/home/kgadberry/projects/minecraft-dev'
-const manifestFile = path.join(__dirname, 'manifest.json')
+// `replay.js backend-db` runs the lane on Ledger's Postgres extension; the S11 manifest pins that profile.
+const backendDb = process.argv[2] === 'backend-db'
+const manifestFile = path.join(__dirname, backendDb ? '../s11/manifest.json' : 'manifest.json')
 const manifest = JSON.parse(fs.readFileSync(manifestFile))
 const evidence = '/mnt/WORKSPACE/scratchpad/fawe-s10-evidence'
-const profile = 'replay'
+const profile = backendDb ? 'replay-backend-db' : 'replay'
 
-const ROWS = `SELECT a.id, ai.action_identifier AS action, a.x, a.y, a.z, a.rolled_back AS rolledBack,
+const ROWS = `SELECT a.id, ai.action_identifier AS action, a.x, a.y, a.z, a.rolled_back AS "rolledBack",
   s.name AS source, a.extra_data AS extra
   FROM actions a JOIN ActionIdentifiers ai ON ai.id = a.action_id JOIN sources s ON s.id = a.source`
-
-function query (dbFile, sql, ...params) {
-  const db = new DatabaseSync(dbFile, { readOnly: true, timeout: 10000 })
-  try { return db.prepare(sql).all(...params) } finally { db.close() }
-}
 
 async function main () {
   fs.mkdirSync(evidence, { recursive: true })
   const recordFile = path.join(evidence, `s10-${profile}-${Date.now()}.json`)
   const report = { accepted: false, suite: 's10-replay', profile, resourcePolicy: RESOURCE_POLICY, samples: [], checks: [] }
-  let rig, lease, problem
+  let rig, lease, problem, database
   try {
     for (const side of ['client', 'server', 'metadata', 'assetIndex']) verify(manifest.minecraft[side])
     for (const input of [...manifest.minecraft.libraries, ...manifest.loader.libraries]) verify(input)
@@ -40,30 +38,38 @@ async function main () {
     if (!/^eula=true\s*$/m.test(fs.readFileSync(verify(manifest.eula), 'utf8'))) throw new GateError('Authorized EULA missing', 2)
     for (const binary of ['java', 'javac', 'jar', 'unzip', 'Xvfb', 'xauth', 'vulkaninfo']) tool('sh', ['-c', 'command -v "$1"', 'sh', binary])
     if (!process.env.TMPDIR || !process.env.VK_DRIVER_FILES || !fs.existsSync(process.env.VK_DRIVER_FILES)) throw new GateError('Use pinned Nix shell', 2)
-    report.sourceHashes = Object.fromEntries(['test/s10/replay.js', 'test/s10/pin.py', 'test/harness/smoke.js']
+    report.sourceHashes = Object.fromEntries(['test/s10/replay.js', 'test/s10/pin.py', 'test/harness/smoke.js',
+      'test/harness/postgres.js', 'test/harness/ledgerdb.js']
       .map(name => [name, hash(path.join(repo, name))]))
     lease = new SingleLaneLease()
     const admission = await admitResources({ samples: report.samples })
-    rig = new Rig('/mnt/WORKSPACE/scratchpad/fawe/fawe-fast-editing-20261029-s10-replay', manifest, manifestFile, admission)
+    rig = new Rig(`/mnt/WORKSPACE/scratchpad/fawe/fawe-fast-editing-20261029-s10-replay${backendDb ? '-backend-db' : ''}`,
+      manifest, manifestFile, admission)
     report.admission = admission
     report.root = rig.root
     console.log(JSON.stringify({ root: rig.root }))
-    const dbFile = path.join(rig.root, 'server/world/ledger.sqlite')
+    if (backendDb) database = await startPostgres(rig)
+    const ledgerDb = database ? postgresReader(database) : sqliteReader(path.join(rig.root, 'server/world/ledger.sqlite'))
+    const { query } = ledgerDb
+    report.database = database ? { kind: 'postgres', image: 'postgres:18-alpine', container: database.name, port: database.port } : { kind: 'sqlite' }
     // S10_SOFT=1 records every check and fails at the end, for red runs that map all differences.
     const check = (name, condition, detail) => {
       report.checks.push({ name, passed: Boolean(condition), detail })
       if (!condition && !process.env.S10_SOFT) throw new GateError(`${name}: ${JSON.stringify(detail)}`)
     }
-    const rowsAt = (action, x1, x2, z, y = 80) => query(dbFile,
+    const rowsAt = (action, x1, x2, z, y = 80) => query(
       `${ROWS} WHERE ai.action_identifier = ? AND a.x BETWEEN ? AND ? AND a.y = ? AND a.z = ? ORDER BY a.id`, action, x1, x2, y, z)
     // Ledger also logs the lane's own fill and setblock commands, as source "command".
     const playerRowsAt = (...args) => rowsAt(...args).filter(row => row.source === 'player')
-    const replays = () => query(dbFile, `${ROWS} WHERE ai.action_identifier = 'ledger-replay' ORDER BY a.id`)
+    const replays = () => query(`${ROWS} WHERE ai.action_identifier = 'ledger-replay' ORDER BY a.id`)
       .map(row => ({ ...row, extra: JSON.parse(row.extra) }))
     const settle = () => new Promise(resolve => setTimeout(resolve, 3000))
     let flagged
     await smoke(rig, repo, workspace, profile, undefined, {
       jvmArgs: ['-Dfawe.experimental.coordinated=true'],
+      async configureServer (serverDir) {
+        if (database) writeExtensionConfig(serverDir, manifest, database)
+      },
       async contract (rig, send, name, { client, chatCommand: sendChatCommand }) {
         let lastCommandTick
         const clock = async () => {
@@ -112,7 +118,7 @@ async function main () {
         await chatCommand('fawe-coordinated set stone', /Coordinated edit complete: 4 changes/)
         const originals = rowsAt('fawe-block', 4400, 4403, 4400)
         check('fawe-rows', originals.length === 4 && originals.every(row => row.rolledBack === 0), originals)
-        const faweRowCount = () => query(dbFile, `${ROWS} WHERE ai.action_identifier LIKE 'fawe-%'`).length
+        const faweRowCount = () => query(`${ROWS} WHERE ai.action_identifier LIKE 'fawe-%'`).length
         const faweBefore = faweRowCount()
         const rolled = await replay('ledger rollback action:fawe-block range:5 after:1h', 4401.5, 4400.5)
         check('fawe-rollback-world', await blocks(4400, 4403, 4400, 'air') === 4, {})
@@ -210,6 +216,7 @@ async function main () {
       }
       report.processes = rig.children.map(({ child, ...entry }) => entry)
     }
+    try { stopPostgres(database, rig && path.join(rig.root, 'postgres.log')) } catch (error) { problem ||= error }
     if (!rig || rig.children.every(entry => entry.stopped)) lease?.close()
     report.leaseReleased = !lease || lease.closed
     report.error = problem?.stack

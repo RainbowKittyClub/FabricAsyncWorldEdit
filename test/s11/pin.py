@@ -58,5 +58,14 @@ fixtures = {'claims': ['s6-probe'], 'polymer': ['polymer-fixture']}
 for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
     for base, extra in (('full', ['scalablelux']), ('vanilla-light', [])):
         manifest['profiles'][f'{suite}-{base}'] = [*stack, *extra, *fixtures.get(suite, [])]
+# backend-db: the full stack with Ledger's Postgres extension (the jar the previous network ran,
+# 1.2.2, taken from the server-data history), against a disposable Postgres 18 container.
+deps['ledger-databases'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ledger-databases-1.2.2/'
+                                    'ledger-databases-1.2.2.jar'))
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
+    manifest['profiles'][f'{suite}-backend-db'] = [*manifest['profiles'][f'{suite}-full'], 'ledger-databases']
+# The S8 audit and S10 replay lanes run from this manifest too (`s8/run.js backend-db`).
+for lane in ('audit', 'replay'):
+    manifest['profiles'][f'{lane}-backend-db'] = [*manifest['profiles'][lane], 'ledger-databases']
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))
