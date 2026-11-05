@@ -5,32 +5,34 @@
 // same cells and the same effect of the block, after removal, undo, redo and a restart. The
 // vanilla-made rows are the reference; a deliberately wrong row proves the comparison can tell a
 // missing block from a right one. A subject is one declaring mod's block and what a client sees of
-// it: diagonal walls draw arm displays, a player-portals frame block gives light a stand-in cannot.
-// The portal block of the same mod declares nothing and must still be refused.
+// it: diagonal walls draw arm displays, a player-portals frame block gives light a stand-in cannot,
+// a planked chest has a display holder. A paste of a vanilla-made double chest with contents
+// follows, since a half's holder looks for its partner. Blocks a mod leaves undeclared (the lit
+// portal block, the crafting table) must still be refused.
 
-const { canonical, probe, differences } = require('./common')
+const { canonical, probe, differences, holdsItem } = require('./common')
 
 const Y = 80
 const STONE = 'minecraft:stone'
 // Blocks at (0,0), (1,1) and (2,0) of a 3x2 box: two diagonals, no block beside another.
 const CELLS = [[0, 0], [1, 1], [2, 0]]
-const box = (name, x1, z1) => ({ name, x1, y1: Y, z1, x2: x1 + 2, y2: Y, z2: z1 + 1 })
+const box = (name, x1, z1, width = 3, depth = 2) => ({ name, x1, y1: Y, z1, x2: x1 + width - 1, y2: Y, z2: z1 + depth - 1 })
 const corners = b => [b.x1, b.y1, b.z1, b.x2, b.y2, b.z2]
 const cellAt = (b, [dx, dz]) => [b.x1 + dx, Y, b.z1 + dz]
 const states = area => area.cells.map(cell => canonical(cell.state))
 const shown = area => area.displays.map(({ at, shows }) => `${at}|${shows}`).sort()
 const lights = area => area.cells.map(cell => `${cell.light}/${cell.lightAbove}`)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const arms = { look: area => [...states(area), ...shown(area)], shows: area => shown(area).length > 0 }
 
+// Each subject owns a band of rows 32 blocks from the next; the player stands near its band.
 const SUBJECTS = [
   {
     key: 'walls',
     block: 'minecraft:cobblestone_wall',
     state: 'minecraft:cobblestone_wall[east=none,north=none,south=none,up=true,waterlogged=false,west=none]',
     z: 7000,
-    // The arm displays a client holds.
-    look: area => [...states(area), ...shown(area)],
-    shows: area => shown(area).length > 0
+    ...arms
   },
   {
     key: 'frames',
@@ -40,8 +42,29 @@ const SUBJECTS = [
     // The stand-in gives no light of its own; the server's reaches the client by Polymer's resend.
     look: area => [...states(area), ...lights(area)],
     shows: area => area.cells.some(cell => cell.light > 0)
+  },
+  {
+    key: 'chests',
+    block: 'sensiblestorage:oak_chest',
+    state: 'sensiblestorage:oak_chest[facing=north,type=single,waterlogged=false]',
+    z: 7064,
+    // A chest's holder draws its base and lid as displays over the vanilla stand-in.
+    ...arms
   }
 ]
+// A vanilla-made double chest with contents, pasted: left half at the west, facing north.
+const DOUBLES = [
+  { key: 'double-chest', block: 'sensiblestorage:oak_chest', z: 7096, items: [['diamond', 3], ['emerald', 2]] },
+  { key: 'double-trapped-chest', block: 'sensiblestorage:oak_trapped_chest', z: 7128, items: [['iron_ingot', 2], ['gold_ingot', 7]] }
+]
+const bandOf = z => `forceload add 6992 ${z - 8} 7111 ${z + 23}`
+const clearOf = z => `fill 6992 ${Y - 1} ${z - 8} 7111 ${Y + 3} ${z + 23} minecraft:air`
+const viewOf = z => `7048.5 82 ${z + 4.5} 180 20`
+// One lone portal block, away from every row, with no lit frame behind it.
+const GHOST = [7040, Y, 7160]
+const GHOST_STATE = 'playerportals:portal[axis=x,sealed=false]'
+const BANDS = [...SUBJECTS.map(subject => subject.z), ...DOUBLES.map(double => double.z), GHOST[2]]
+
 // Sixteen blocks apart: each row in its own chunk.
 const rowsOf = subject => {
   const row = (label, x) => box(`${subject.key}-${label}`, x, subject.z)
@@ -53,19 +76,24 @@ const rowsOf = subject => {
     control: row('control', 7104)
   }
   rows.view = [rows.mirror, rows.native, rows.staticMirror, rows.coordinated, rows.apiNative, rows.apiBulk, rows.wrong]
+  subject.expect = b => (x, y, z) => CELLS.some(c => cellAt(b, c).join() === [x, y, z].join()) ? subject.state : undefined
   return rows
 }
-// One lone portal block, away from every row, with no lit frame behind it.
-const GHOST = [7040, Y, 7064]
-const GHOST_STATE = 'playerportals:portal[axis=x,sealed=false]'
-const AREAS = ['forceload add 6992 6992 7111 7015', 'forceload add 6992 7024 7111 7071']
-const CLEAR = [`fill 6992 ${Y - 1} 6992 7111 ${Y + 3} 7015 minecraft:air`, `fill 6992 ${Y - 1} 7024 7111 ${Y + 3} 7071 minecraft:air`]
-const VIEW = '7048.5 82 7004.5 180 20'
+const doubleRows = double => {
+  const row = (label, z) => box(`${double.key}-${label}`, 7000, z, 2, 1)
+  const rows = { source: row('source', double.z), pasted: row('pasted', double.z + 4), wrong: row('wrong', double.z + 8) }
+  rows.view = [rows.source, rows.pasted, rows.wrong]
+  const half = type => `${double.block}[facing=north,type=${type},waterlogged=false]`
+  double.expect = b => x => x === b.x1 ? half('left') : half('right')
+  double.look = arms.look
+  double.shows = arms.shows
+  return rows
+}
 
 module.exports = ({ rig, check, paced }) => {
   let client, chatCommand, select
 
-  // What the client holds for a subject's rows, retried until the packets have all arrived.
+  // What the client holds for a band's rows, retried until the packets have all arrived.
   const view = async rows => {
     const answer = await client.send({ action: 'region', boxes: rows.view })
     return answer.inWorld ? answer.boxes : null
@@ -76,12 +104,13 @@ module.exports = ({ rig, check, paced }) => {
     try {
       await rig.wait(`${label} views settled`, async () => {
         const problems = []
-        for (const b of placed) if ((await differences(send, { box: corners(b), expect: (x, y, z) =>
-          CELLS.some(c => cellAt(b, c).join() === [x, y, z].join()) ? subject.state : undefined })).length) problems.push(`server ${b.name} is not the pattern`)
+        for (const b of placed) if ((await differences(send, { box: corners(b), expect: subject.expect(b) })).length) problems.push(`server ${b.name} is not the pattern`)
         for (const b of removed) if ((await differences(send, { box: corners(b), expect: () => undefined })).length) problems.push(`server ${b.name} is not empty`)
         const boxes = await view(rows)
         if (!boxes) problems.push('client is not in the world')
         else {
+          // An unloaded box reads as air, which would pass every check of an empty row.
+          for (const b of rows.view) if (!boxes[b.name]?.loaded) problems.push(`client lacks ${b.name}`)
           for (const [a, b] of pairs) {
             if (!same(subject.look(boxes[a.name]), subject.look(boxes[b.name]))) {
               problems.push(`${a.name} ${JSON.stringify(subject.look(boxes[a.name])).slice(0, 220)} differs from ${b.name} ${JSON.stringify(subject.look(boxes[b.name])).slice(0, 220)}`)
@@ -118,6 +147,7 @@ module.exports = ({ rig, check, paced }) => {
     const rows = rowsOf(subject)
     const { mirror, native, staticMirror, coordinated, apiNative, apiBulk, wrong, control } = rows
     const key = subject.key
+    await send(`tp ${name} ${viewOf(subject.z)}`)
 
     // The references first: strict vanilla commands, the lifecycle every route must reproduce.
     await place(send, subject.block, mirror)
@@ -167,6 +197,64 @@ module.exports = ({ rig, check, paced }) => {
     await settle(subject, rows, 'redo-removes-the-block', send, { removed: [native], pairs: [[native, mirror]], bare: [native] })
   }
 
+  // The contents a double chest's two halves hold, and what each half reports when asked.
+  const contents = async (send, double, b) => {
+    const [left, right] = double.items
+    return {
+      ok: await holdsItem(send, [b.x1, Y, b.z1], 0, left[0], left[1]) && await holdsItem(send, [b.x2, Y, b.z1], 0, right[0], right[1]),
+      left: await send(`data get block ${b.x1} ${Y} ${b.z1} Items`),
+      right: await send(`data get block ${b.x2} ${Y} ${b.z1} Items`)
+    }
+  }
+  const checkContents = async (name, send, double, ...rows) => {
+    const seen = []
+    for (const b of rows) seen.push(await contents(send, double, b))
+    check(name, seen.every(entry => entry.ok), seen)
+  }
+
+  // A double chest made the vanilla way, copied and pasted: both halves, their contents and their
+  // holders must come out as the original has them, and survive removal, undo, redo and a restart.
+  const doubleContract = async (double, send, name) => {
+    const rows = doubleRows(double)
+    const { source, pasted, wrong } = rows
+    const key = double.key
+    const [left, right] = double.items
+    await send(`tp ${name} ${viewOf(double.z)}`)
+    // The player stands on stone west of the source, and the same way four south to paste.
+    await send(`fill 6998 ${Y - 1} ${double.z} 6999 ${Y - 1} ${double.z + 4} minecraft:stone`)
+    await send(`setblock ${source.x1} ${Y} ${source.z1} ${double.block}[facing=north,type=left]{Items:[{Slot:0b,id:"minecraft:${left[0]}",count:${left[1]}}]} strict`)
+    await send(`setblock ${source.x2} ${Y} ${source.z1} ${double.block}[facing=north,type=right]{Items:[{Slot:0b,id:"minecraft:${right[0]}",count:${right[1]}}]} strict`)
+    await send(`setblock ${wrong.x1} ${Y} ${wrong.z1} ${double.block}[facing=north,type=single]{Items:[{Slot:0b,id:"minecraft:${left[0]}",count:${left[1]}}]} strict`)
+    check(`${key}:source-is-a-double-chest`, (await differences(send, { box: corners(source), expect: double.expect(source) })).length === 0)
+    await checkContents(`${key}:source-holds-its-contents`, send, double, source)
+
+    await select(source)
+    await send(`tp ${name} 6999.5 ${Y} ${double.z + 0.5}`)
+    await chatCommand('/copy', /blocks were copied|blocks affected/)
+    await send(`tp ${name} 6999.5 ${Y} ${double.z + 4.5}`)
+    await chatCommand('/paste', /clipboard has been pasted/)
+    await chatCommand('/clearclipboard', /Clipboard cleared/)
+    await send(`tp ${name} ${viewOf(double.z)}`)
+
+    const placed = await settle(double, rows, 'pasted-matches-source', send, {
+      placed: [source, pasted], pairs: [[pasted, source]], armed: [source, pasted]
+    })
+    await checkContents(`${key}:pasted-contents-kept`, send, double, pasted)
+    check(`${key}:comparison-detects-a-lone-half`, placed && !same(double.look(placed[wrong.name]), double.look(placed[source.name])), placed && double.look(placed[wrong.name]))
+
+    await select(pasted)
+    await chatCommand('/set air', /Operation completed/)
+    await settle(double, rows, 'removed-leaves-nothing', send, { removed: [pasted], bare: [pasted] })
+    await chatCommand('/undo', /Undid/)
+    await settle(double, rows, 'undo-restores-the-pair', send, { placed: [pasted], pairs: [[pasted, source]], armed: [pasted] })
+    await checkContents(`${key}:undo-restores-contents`, send, double, pasted)
+    await chatCommand('/redo', /Redid/)
+    await settle(double, rows, 'redo-removes-the-pair', send, { removed: [pasted], bare: [pasted] })
+    // Back again for the restart, which rebuilds both rows' holders from the saved chunks.
+    await chatCommand('/undo', /Undid/)
+    await settle(double, rows, 'undo-again-restores-the-pair', send, { placed: [pasted], pairs: [[pasted, source]], armed: [pasted] })
+  }
+
   return {
     async contract (rig_, send, name, { client: playerClient, chatCommand: sendChatCommand }) {
       client = playerClient
@@ -175,46 +263,62 @@ module.exports = ({ rig, check, paced }) => {
         await chatCommand(`/pos1 ${b.x1},${b.y1},${b.z1}`, /First position set|Position already set/)
         await chatCommand(`/pos2 ${b.x2},${b.y2},${b.z2}`, /Second position set|Position already set/)
       }
-      for (const area of AREAS) await send(area)
-      for (const clear of CLEAR) await send(clear)
-      await send(`tp ${name} ${VIEW}`)
+      for (const z of BANDS) await send(bandOf(z))
+      for (const z of BANDS) await send(clearOf(z))
 
       // Which blocks FAWE edits is each mod's to declare; a mod that declares nothing for a block
       // gets no support for it.
       const lifecycle = await probe(send, 'lifecycle minecraft:cobblestone_wall minecraft:oak_fence minecraft:glass_pane ' +
-        'playerportals:void_infused_deepslate playerportals:portal minecraft:stone')
+        'playerportals:void_infused_deepslate playerportals:portal sensiblestorage:oak_chest sensiblestorage:oak_trapped_chest ' +
+        'sensiblestorage:spruce_crafting_table sensiblestorage:spruce_bookshelf minecraft:stone minecraft:chest')
       const byBlock = Object.fromEntries(lifecycle.blocks.map(entry => [entry.block, entry]))
-      check('declared-blocks-supported', byBlock['minecraft:cobblestone_wall'].supported && byBlock['minecraft:oak_fence'].supported &&
-        byBlock['minecraft:glass_pane'].supported && byBlock['playerportals:void_infused_deepslate'].supported && lifecycle.declared > 0, lifecycle)
-      check('declared-blocks-stay-per-cell', !byBlock['minecraft:cobblestone_wall'].direct && !byBlock['playerportals:void_infused_deepslate'].direct &&
-        byBlock['minecraft:stone'].direct, lifecycle)
-      check('undeclared-portal-block-unsupported', !byBlock['playerportals:portal'].supported && !byBlock['playerportals:portal'].direct, lifecycle)
+      const declared = ['minecraft:cobblestone_wall', 'minecraft:oak_fence', 'minecraft:glass_pane', 'playerportals:void_infused_deepslate',
+        'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest']
+      const undeclared = ['playerportals:portal', 'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_bookshelf']
+      check('declared-blocks-supported', declared.every(id => byBlock[id].supported) && lifecycle.declared > 0, lifecycle)
+      check('declared-blocks-stay-per-cell', declared.every(id => !byBlock[id].direct) && byBlock['minecraft:stone'].direct, lifecycle)
+      check('undeclared-blocks-unsupported', undeclared.every(id => !byBlock[id].supported && !byBlock[id].direct), lifecycle)
+      // Inventories: the vanilla chest by default, a mod's chests by its declaration, nothing else.
+      const containers = ['minecraft:chest', 'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest']
+      check('declared-containers', containers.every(id => byBlock[id].container) &&
+        [...declared, ...undeclared].filter(id => !containers.includes(id)).every(id => !byBlock[id].container), lifecycle)
 
       for (const subject of SUBJECTS) await subjectContract(subject, send, name)
+      for (const double of DOUBLES) await doubleContract(double, send, name)
 
       // A lit portal's interior has a record outside the chunk that undo cannot restore, so its
       // block stays undeclared: an edit that would replace it skips the cell and says so.
+      await send(`tp ${name} ${viewOf(GHOST[2])}`)
       await send(`setblock ${GHOST.join(' ')} ${GHOST_STATE}`)
       await select({ x1: GHOST[0], y1: GHOST[1], z1: GHOST[2], x2: GHOST[0], y2: GHOST[1], z2: GHOST[2] })
       await chatCommand('/set stone', /Skipped 1 unsupported blocks?.*playerportals:portal/)
-      check('undeclared-portal-block-kept', (await differences(send, { box: [...GHOST, ...GHOST], expect: () => GHOST_STATE })).length === 0,
-        await differences(send, { box: [...GHOST, ...GHOST], expect: () => GHOST_STATE }))
+      const kept = await differences(send, { box: [...GHOST, ...GHOST], expect: () => GHOST_STATE })
+      check('undeclared-portal-block-kept', kept.length === 0, kept)
       await send(`setblock ${GHOST.join(' ')} minecraft:air`)
       await send('save-all flush')
     },
     async restart (rig_, send, name, { client: restartedClient }) {
       client = restartedClient
-      for (const area of AREAS) await send(area)
-      await send(`tp ${name} ${VIEW}`)
+      for (const z of BANDS) await send(bandOf(z))
       // Reloaded chunks rebuild what the blocks give from the world; none may be lost or left over.
       for (const subject of SUBJECTS) {
         const rows = rowsOf(subject)
         const { mirror, native, staticMirror, coordinated, apiNative, apiBulk } = rows
         const fawe = [coordinated, apiNative, apiBulk]
+        await send(`tp ${name} ${viewOf(subject.z)}`)
         await settle(subject, rows, 'restart-rebuilt', send, {
           placed: [staticMirror, ...fawe], removed: [native, mirror],
           pairs: [[native, mirror], ...fawe.map(b => [b, staticMirror])], armed: [staticMirror, ...fawe], bare: [native, mirror]
         })
+      }
+      for (const double of DOUBLES) {
+        const rows = doubleRows(double)
+        const { source, pasted } = rows
+        await send(`tp ${name} ${viewOf(double.z)}`)
+        await settle(double, rows, 'restart-rebuilt', send, {
+          placed: [source, pasted], pairs: [[pasted, source]], armed: [source, pasted]
+        })
+        await checkContents(`${double.key}:restart-contents-kept`, send, double, pasted, source)
       }
     }
   }
