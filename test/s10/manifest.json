@@ -1786,7 +1786,7 @@
     },
     "candidate": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-dist.jar",
-      "sha256": "51bef2fcf72e47e177538cc521dd9a5bb432347619e01704866b782684c39a2f",
+      "sha256": "eb3157674aeed9c17f983dedf7c7755cd45471320df7cab95816c3bce9eb6407",
       "nested": [
         {
           "path": "META-INF/jars/SparseBitSet-1.3.jar",
@@ -1844,7 +1844,7 @@
     },
     "lifecycle-probe": {
       "path": "/home/kgadberry/projects/minecraft-dev/rkc/forks/FabricAsyncWorldEdit/.claude/worktrees/wf_6f7c091d-06c-2/worldedit-fabric/build/libs/worldedit-fabric-mc26.3-2.16.2-SNAPSHOT-testmod.jar",
-      "sha256": "6d9cd4f79b47137baf0dcc596969a8f0a763c7d1a5f0f5b6117a60c89b97800a",
+      "sha256": "6626a82e1dc3c5d6302b6c48afd90980541cfe29228ed86e430327bdfd44a219",
       "nested": []
     },
     "ledger-rkc": {
