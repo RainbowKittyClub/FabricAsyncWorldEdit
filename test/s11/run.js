@@ -60,7 +60,13 @@ async function main () {
       pacedClock = await clock()
       await sendChatCommand(command, response)
     }
-    const hooks = require(SUITES[suite])({ rig, check, paced, GateError })
+    // With OPAC loaded FAWE refuses the operations that have no per-cell footprint to authorize
+    // (NativeClaims.unsupported: lazy cut, regeneration, entities); suites expect that refusal.
+    const claimed = manifest.profiles[profile].includes('opac')
+    // With Ledger loaded a unit finishes only once its rows are durable, and a cell changed after the
+    // snapshot conflicts (Ledger needs the exact before-value), so pacing and conflicts differ.
+    const ledgered = manifest.profiles[profile].includes('ledger-rkc')
+    const hooks = require(SUITES[suite])({ rig, check, paced, GateError, claimed, ledgered })
     await smoke(rig, repo, workspace, profile, undefined, {
       jvmArgs: ['-Dfawe.experimental.coordinated=true'],
       restartClient: true,

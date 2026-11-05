@@ -42,13 +42,22 @@ const CASES = [
   { name: 'unsupported-skip', box: [5022, 82, 5004, 5023, 82, 5004], expect: () => 'minecraft:air' }
 ]
 
-module.exports = ({ rig, check, paced }) => {
+// With OPAC loaded the lazy cut and the move are refused: the cut source keeps its block, nothing is
+// pasted, and the moved row stays where it was.
+const REFUSED = {
+  'cut-source': () => 'minecraft:gold_block',
+  'cut-paste': () => 'minecraft:air',
+  move: x => x <= 5057 ? 'minecraft:cobblestone' : 'minecraft:air'
+}
+
+module.exports = ({ rig, check, paced, claimed }) => {
   let revoked
   const receipts = async (send, words) => JSON.parse(await send(`fawes10 receipts${words ? ` ${words}` : ''}`))
   const count = async (send, box, block) => JSON.parse(await send(`fawes9 count ${box.join(' ')} minecraft:${block}`)).count
+  const cases = CASES.map(entry => claimed && REFUSED[entry.name] ? { ...entry, expect: REFUSED[entry.name] } : entry)
 
   const verifyAll = async (send, suffix) => {
-    for (const entry of CASES) {
+    for (const entry of cases) {
       const wrong = await differences(send, entry)
       check(`${entry.name}${suffix}`, wrong.length === 0, wrong)
     }
@@ -122,13 +131,22 @@ module.exports = ({ rig, check, paced }) => {
       // FAWE's cut is lazy: the source clears only when the clipboard is pasted.
       await select(5050, 80, 5000, 5051, 80, 5000)
       await tp(5049, 80, 5000)
-      await chatCommand('/cut', /will be removed on paste|blocks affected/)
-      await tp(5049, 80, 5004)
-      await chatCommand('/paste', /clipboard has been pasted/)
-      await chatCommand('/clearclipboard', /Clipboard cleared/)
+      if (claimed) {
+        await chatCommand('/cut', /OPAC protected editing refuses unsupported operation: cut/)
+        // The refused cut leaves no clipboard, and /clearclipboard says nothing without one.
+      } else {
+        await chatCommand('/cut', /will be removed on paste|blocks affected/)
+        await tp(5049, 80, 5004)
+        await chatCommand('/paste', /clipboard has been pasted/)
+        await chatCommand('/clearclipboard', /Clipboard cleared/)
+      }
 
       await select(5056, 80, 5000, 5057, 80, 5000)
-      await chatCommand('/move 3 east', /blocks moved/)
+      if (claimed) {
+        await chatCommand('/move 3 east', /OPAC protected editing refuses unsupported operation: move\/regeneration/)
+      } else {
+        await chatCommand('/move 3 east', /blocks moved/)
+      }
       await select(5056, 80, 5006, 5057, 80, 5006)
       await chatCommand('/stack 2 east', /blocks changed/)
 

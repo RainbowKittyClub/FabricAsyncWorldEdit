@@ -45,5 +45,18 @@ if fixture['sha256'] != s7['artifacts']['fixture']['sha256']:
     raise RuntimeError('S7 fixture jar differs from its pin')
 deps['polymer-fixture'] = fixture
 manifest['profiles']['polymer-content'] = [*manifest['profiles']['polymer'], 'polymer-fixture']
+# Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
+# accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
+# ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
+# fixture: s6-probe for claims, and the polymer fixture, whose overlays sit on vanilla chests and logs.
+stack = ['candidate', 'fabric-api-polymer', 'lifecycle-probe', 'polymer-accepted', *audit, 'test-permissions',
+         'lithium', 'c2me', 'diagonal-walls', 'sensible-storage', 'player-portals', 'terrestria', 'polymer-patch-bundle']
+# Throughput with only Ledger and OPAC added to the base set: tells their cost from the rest of the stack.
+manifest['profiles']['throughput-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
+manifest['profiles']['throughput-opac'] = ['candidate', 'fabric-api', 'lifecycle-probe', 'opac', 'forge-config']
+fixtures = {'claims': ['s6-probe'], 'polymer': ['polymer-fixture']}
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
+    for base, extra in (('full', ['scalablelux']), ('vanilla-light', [])):
+        manifest['profiles'][f'{suite}-{base}'] = [*stack, *extra, *fixtures.get(suite, [])]
 (root / 'test/s11/manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps({key: deps[key]['sha256'][:16] for key in ('candidate', 'lifecycle-probe')}))

@@ -42,7 +42,12 @@ const chunksOf = ([x1, , z1, x2, , z2]) => {
 }
 const cellCount = ([x1, y1, z1, x2, y2, z2]) => (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
 
-module.exports = ({ rig, check, paced }) => {
+module.exports = ({ rig, check, paced, ledgered }) => {
+  // Strict: one publication on every tick. With Ledger a unit finishes only once its rows are
+  // durable, so a chunk's next unit and the admission window wait for that: the bound is at most
+  // one unit a tick and the run done within twice as many ticks as units.
+  const inOrder = entry => ledgered ? entry.distinct && entry.span <= 2 * entry.units : entry.consecutive
+  const noIdle = (before, after) => ledgered || before === after
   const CASES = [
     { name: 'set16-undone', box: SET16, expect: () => undefined },
     { name: 'large', box: LARGE, expect: () => 'minecraft:glass' },
@@ -73,6 +78,8 @@ module.exports = ({ rig, check, paced }) => {
       outcomes: [...new Set(own.map(entry => entry.outcome))],
       // Consecutive: one publication on every tick from the first to the last.
       consecutive: ticks.length > 0 && new Set(ticks).size === ticks.length && ticks.at(-1) - ticks[0] + 1 === ticks.length,
+      distinct: new Set(ticks).size === ticks.length,
+      span: ticks.length ? ticks.at(-1) - ticks[0] + 1 : 0,
       ticks: ticks.length ? [ticks[0], ticks.at(-1)] : [],
       maxMs: Math.max(0, ...own.map(entry => entry.nanos / 1e6)),
       meanMs: own.length ? own.reduce((sum, entry) => sum + entry.nanos, 0) / own.length / 1e6 : 0
@@ -126,7 +133,7 @@ module.exports = ({ rig, check, paced }) => {
       check('set16-reply-after-units', unitsAfterReply === 0, { replied, ticks: set.ticks, unitsAfterReply })
       check('set16-units', set.units === 16 && set.applied === cellCount(SET16) && set.outcomes.join() === 'COMPLETE',
         { ...set, own: undefined })
-      check('set16-consecutive', set.consecutive && idle === 0, { ticks: set.ticks, idle, ...lags(timing, afterSet) })
+      check('set16-consecutive', inOrder(set) && (ledgered || idle === 0), { ticks: set.ticks, idle, ...lags(timing, afterSet) })
       check('set16-world', (await differences(send, { box: SET16, expect: () => 'minecraft:stone' })).length === 0, {})
       check('publication-time-recorded', set.own.every(entry => entry.nanos > 0),
         { maxMs: set.maxMs, meanMs: set.meanMs, cellsPerUnit: cellCount(SET16) / 16 })
@@ -135,7 +142,7 @@ module.exports = ({ rig, check, paced }) => {
       since = await now(send)
       await chatCommand('undo', /Undid/)
       const undo = await settled(send, client, since, SET16, 16)
-      check('undo16-units', undo.units === 16 && undo.applied === cellCount(SET16) && undo.consecutive &&
+      check('undo16-units', undo.units === 16 && undo.applied === cellCount(SET16) && inOrder(undo) &&
         undo.outcomes.join() === 'COMPLETE', { ...undo, own: undefined })
 
       // Over 4096 cells in one chunk: two units of it, the later admitted once the earlier finished.
@@ -155,8 +162,8 @@ module.exports = ({ rig, check, paced }) => {
       await chatCommand('/set oak_planks', /Operation completed/)
       const wide = await settled(send, client, since, WIDE, 8)
       const afterWide = await probe(send, 'timing')
-      check('wide-consecutive', wide.units === 8 && wide.applied === cellCount(WIDE) && wide.consecutive &&
-        afterWide.idleWithPending === timing.idleWithPending && wide.outcomes.join() === 'COMPLETE',
+      check('wide-consecutive', wide.units === 8 && wide.applied === cellCount(WIDE) && inOrder(wide) &&
+        noIdle(timing.idleWithPending, afterWide.idleWithPending) && wide.outcomes.join() === 'COMPLETE',
       { ...wide, own: undefined, idle: afterWide.idleWithPending - timing.idleWithPending, ...lags(timing, afterWide) })
 
       // Neighbour updates on: one unit per chunk as without them, the callbacks after its writes.
@@ -174,11 +181,11 @@ module.exports = ({ rig, check, paced }) => {
       await chatCommand('/set glass', /Operation completed/)
       const neighbors16 = await settled(send, client, since, NEIGHBORS16, 16)
       check('neighbors16-consecutive', neighbors16.units === 16 && neighbors16.applied === cellCount(NEIGHBORS16) &&
-        neighbors16.consecutive && neighbors16.outcomes.join() === 'COMPLETE', { ...neighbors16, own: undefined })
+        inOrder(neighbors16) && neighbors16.outcomes.join() === 'COMPLETE', { ...neighbors16, own: undefined })
       since = await now(send)
       await chatCommand('undo', /Undid/)
       const neighbors16Undo = await settled(send, client, since, NEIGHBORS16, 16)
-      check('neighbors16-undo-consecutive', neighbors16Undo.units === 16 && neighbors16Undo.consecutive &&
+      check('neighbors16-undo-consecutive', neighbors16Undo.units === 16 && inOrder(neighbors16Undo) &&
         neighbors16Undo.applied === cellCount(NEIGHBORS16), { ...neighbors16Undo, own: undefined })
 
       // Water learns of a removed wall only through a neighbour update.
@@ -209,10 +216,27 @@ module.exports = ({ rig, check, paced }) => {
       await select(...TARGET16)
       since = await now(send)
       await client.send({ action: 'command', command: '/set oak_planks' })
-      const target16 = await settled(send, client, since, TARGET16, 16, true)
-      await probe(send, 'toggle off')
-      check('toggled-target-no-conflict', target16.units === 16 && target16.applied === cellCount(TARGET16) &&
-        target16.outcomes.join() === 'COMPLETE', { ...target16, own: undefined })
+      let target16 = await settled(send, client, since, TARGET16, 16, true)
+      if (ledgered) {
+        // Ledger needs the exact before-value, so a unit whose target flipped after its snapshot
+        // conflicts and is prepared again; wait until every chunk has completed.
+        const completed = entry => new Set(entry.own.filter(unit => unit.outcome === 'COMPLETE')
+          .map(unit => `${unit.chunkX},${unit.chunkZ}`)).size
+        await rig.wait('toggled chunks complete', async () => {
+          target16 = await publications(send, since, TARGET16)
+          return completed(target16) === chunksOf(TARGET16).size
+        }, 30000, [client.entry]).catch(() => {})
+        await probe(send, 'toggle off')
+        const complete = target16.own.filter(unit => unit.outcome === 'COMPLETE')
+        check('toggled-target-no-conflict', completed(target16) === chunksOf(TARGET16).size &&
+          complete.reduce((sum, unit) => sum + unit.applied, 0) === cellCount(TARGET16) &&
+          target16.outcomes.every(outcome => outcome === 'COMPLETE' || outcome === 'CONFLICT'),
+        { ...target16, own: undefined })
+      } else {
+        await probe(send, 'toggle off')
+        check('toggled-target-no-conflict', target16.units === 16 && target16.applied === cellCount(TARGET16) &&
+          target16.outcomes.join() === 'COMPLETE', { ...target16, own: undefined })
+      }
 
       // A block changing every tick elsewhere in the chunk is not a conflict.
       await probe(send, `toggle ${TOGGLE.join(' ')}`)
