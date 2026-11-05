@@ -48,6 +48,9 @@ manifest['profiles']['polymer-content'] = [*manifest['profiles']['polymer'], 'po
 # The accepted Polymer is the published fork build: S7's bulk-edit API plus the vanilla-id fix.
 deps['polymer-accepted'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/polymer-0.18.6-rkc.3/'
                                     'polymer-bundled-0.18.6-rkc.3+26.3.jar'))
+# Diagonal walls with its fawe:lifecycle declaration (feat/fawe-lifecycle), built from the mod's 26.3 node.
+deps['diagonal-walls'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/diagonal-walls-fawe-lifecycle/'
+                                  'polymerdiagonalwalls-0.1.1+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
@@ -58,14 +61,14 @@ stack = ['candidate', 'fabric-api-polymer', 'lifecycle-probe', 'polymer-accepted
 manifest['profiles']['throughput-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
 manifest['profiles']['throughput-opac'] = ['candidate', 'fabric-api', 'lifecycle-probe', 'opac', 'forge-config']
 fixtures = {'claims': ['s6-probe'], 'polymer': ['polymer-fixture']}
-for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters'):
     for base, extra in (('full', ['scalablelux']), ('vanilla-light', [])):
         manifest['profiles'][f'{suite}-{base}'] = [*stack, *extra, *fixtures.get(suite, [])]
 # backend-db: the full stack with Ledger's Postgres extension (the jar the previous network ran,
 # 1.2.2, taken from the server-data history), against a disposable Postgres 18 container.
 deps['ledger-databases'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ledger-databases-1.2.2/'
                                     'ledger-databases-1.2.2.jar'))
-for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer'):
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters'):
     manifest['profiles'][f'{suite}-backend-db'] = [*manifest['profiles'][f'{suite}-full'], 'ledger-databases']
 # These profiles now run; only Paper, the throughput reference, is still to provision.
 manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles']
