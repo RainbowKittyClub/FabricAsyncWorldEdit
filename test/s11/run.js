@@ -37,6 +37,7 @@ async function main () {
     for (const binary of ['java', 'javac', 'jar', 'Xvfb', 'xauth', 'vulkaninfo']) tool('sh', ['-c', 'command -v "$1"', 'sh', binary])
     if (!process.env.TMPDIR || !process.env.VK_DRIVER_FILES || !fs.existsSync(process.env.VK_DRIVER_FILES)) throw new GateError('Use pinned Nix shell', 2)
     report.sourceHashes = Object.fromEntries(['test/s11/run.js', `test/s11/${suite}.js`, 'test/s11/common.js', 'test/s11/pin.py',
+      ...(suite === 'adapters' ? ['test/s11/storage-data.js'] : []),
       'test/harness/smoke.js', 'test/harness/native.js', 'test/harness/postgres.js', 'test/harness/ledgerdb.js']
       .map(name => [name, hash(path.join(repo, name))]))
     lease = new SingleLaneLease()

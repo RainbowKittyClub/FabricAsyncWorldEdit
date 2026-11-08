@@ -9,7 +9,7 @@
 // a planked chest has a display holder; plain shelves retain their fallback or pack carrier and
 // enchanting-power tag. A paste of a vanilla-made double chest with contents
 // follows, since a half's holder looks for its partner. Blocks a mod leaves undeclared (the lit
-// portal block, the crafting table) must still be refused.
+// portal block) must still be refused. Populated shelves and crafting grids follow in storage-data.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -105,6 +105,7 @@ const doubleRows = double => {
 }
 
 module.exports = ({ rig, check, paced }) => {
+  const storage = require('./storage-data')({ rig, check })
   let client, chatCommand, select, watcher
   const packName = 'FaweShelfPack'
   const repo = path.resolve(__dirname, '../..')
@@ -331,21 +332,29 @@ module.exports = ({ rig, check, paced }) => {
       // gets no support for it.
       const lifecycle = await probe(send, 'lifecycle minecraft:cobblestone_wall minecraft:oak_fence minecraft:glass_pane ' +
         'playerportals:void_infused_deepslate playerportals:portal sensiblestorage:oak_chest sensiblestorage:oak_trapped_chest ' +
-        'sensiblestorage:spruce_crafting_table sensiblestorage:spruce_bookshelf sensiblestorage:spruce_chiseled_bookshelf minecraft:stone minecraft:chest')
+        'sensiblestorage:spruce_crafting_table sensiblestorage:spruce_bookshelf sensiblestorage:spruce_chiseled_bookshelf ' +
+        'minecraft:crafting_table minecraft:chiseled_bookshelf minecraft:stone minecraft:chest')
       const byBlock = Object.fromEntries(lifecycle.blocks.map(entry => [entry.block, entry]))
       const declared = ['minecraft:cobblestone_wall', 'minecraft:oak_fence', 'minecraft:glass_pane', 'playerportals:void_infused_deepslate',
-        'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest', 'sensiblestorage:spruce_bookshelf']
-      const undeclared = ['playerportals:portal', 'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_chiseled_bookshelf']
+        'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest', 'sensiblestorage:spruce_bookshelf',
+        'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_chiseled_bookshelf',
+        'minecraft:crafting_table', 'minecraft:chiseled_bookshelf']
+      const undeclared = ['playerportals:portal']
       check('declared-blocks-supported', declared.every(id => byBlock[id].supported) && lifecycle.declared > 0, lifecycle)
       check('declared-blocks-stay-per-cell', declared.every(id => !byBlock[id].direct) && byBlock['minecraft:stone'].direct, lifecycle)
       check('undeclared-blocks-unsupported', undeclared.every(id => !byBlock[id].supported && !byBlock[id].direct), lifecycle)
       // Inventories: the vanilla chest by default, a mod's chests by its declaration, nothing else.
-      const containers = ['minecraft:chest', 'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest']
+      const containers = ['minecraft:chest', 'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest',
+        'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_chiseled_bookshelf',
+        'minecraft:crafting_table', 'minecraft:chiseled_bookshelf']
       check('declared-containers', containers.every(id => byBlock[id].container) &&
         [...declared, ...undeclared].filter(id => !containers.includes(id)).every(id => !byBlock[id].container), lifecycle)
 
       for (const subject of SUBJECTS) await subjectContract(subject, send, name)
       for (const double of DOUBLES) await doubleContract(double, send, name)
+      await startWatcher('storage-pack')
+      await storage.contract({ send, name, client, watcher, chat: chatCommand })
+      await rig.stop(watcher.entry)
 
       // A lit portal's interior has a record outside the chunk that undo cannot restore, so its
       // block stays undeclared: an edit that would replace it skips the cell and says so.
@@ -387,6 +396,9 @@ module.exports = ({ rig, check, paced }) => {
         })
         await checkContents(`${double.key}:restart-contents-kept`, send, double, pasted, source)
       }
+      await startWatcher('storage-pack-restart')
+      await storage.restart({ send, name, client, watcher })
+      await rig.stop(watcher.entry)
     }
   }
 }

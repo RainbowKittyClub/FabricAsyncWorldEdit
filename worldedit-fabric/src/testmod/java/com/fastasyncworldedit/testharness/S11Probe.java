@@ -22,6 +22,7 @@ import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.util.SideEffectSet;
 import com.sk89q.worldedit.world.block.BlockState;
+import com.sk89q.worldedit.world.block.BaseBlock;
 import com.sk89q.worldedit.world.block.BlockTypes;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -214,7 +215,7 @@ public final class S11Probe implements ModInitializer {
                 }
                 ServerPlayer player = server.getPlayerList().getPlayerByName(words[2]);
                 if (player == null) throw new IllegalArgumentException("No such player " + words[2]);
-                BlockState block = BlockTypes.get(words[3]).getDefaultState();
+                BaseBlock block = BlockTypes.get(words[3]).getDefaultState().toBaseBlock();
                 int[] box = box(words, 4);
                 String id = UUID.randomUUID().toString();
                 Map<String, Object> result = new ConcurrentHashMap<>(Map.of("done", false));
@@ -226,12 +227,51 @@ public final class S11Probe implements ModInitializer {
                 }
                 return GSON.toJson(Map.of("id", id));
             }
+            case "api-copy" -> {
+                ServerPlayer player = server.getPlayerList().getPlayerByName(words[2]);
+                if (player == null) throw new IllegalArgumentException("No such player " + words[2]);
+                String route = words[1];
+                if (!route.equals("native") && !route.equals("bulk")) throw new IllegalArgumentException("Unknown route " + route);
+                BlockVector3 source = BlockVector3.at(Integer.parseInt(words[3]), Integer.parseInt(words[4]), Integer.parseInt(words[5]));
+                int[] destination = box(words, 6);
+                String id = UUID.randomUUID().toString();
+                Map<String, Object> result = new ConcurrentHashMap<>(Map.of("done", false));
+                RESULTS.put(id, result);
+                API_THREAD.execute(() -> {
+                    try {
+                        BaseBlock block;
+                        try (EditSession session = WorldEdit.getInstance().newEditSessionBuilder()
+                                .world(FabricAdapter.adapt(server.overworld())).actor(FabricAdapter.adaptPlayer(player)).build()) {
+                            block = session.getFullBlock(source);
+                        }
+                        if (route.equals("native")) nativeEdit(server, player, block, destination, result);
+                        else server.execute(() -> {
+                            try { bulkEdit(server, player, block, destination, result); }
+                            catch (Throwable failure) { result.put("error", String.valueOf(failure)); result.put("done", true); }
+                        });
+                    } catch (Throwable failure) {
+                        result.put("error", String.valueOf(failure));
+                        result.put("done", true);
+                    }
+                });
+                return GSON.toJson(Map.of("id", id));
+            }
+            case "block-info" -> {
+                BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+                var level = server.overworld();
+                if (!level.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+                    return GSON.toJson(Map.of("loaded", false));
+                }
+                var state = level.getBlockState(pos);
+                return GSON.toJson(Map.of("loaded", true, "signal", state.hasAnalogOutputSignal()
+                        ? state.getAnalogOutputSignal(level, pos, net.minecraft.core.Direction.NORTH) : 0));
+            }
             default -> throw new IllegalArgumentException("Unknown fawes11 command " + words[0]);
         }
     }
 
     // WorldEdit's public session API, off the server thread, with the player as actor.
-    private static void nativeEdit(MinecraftServer server, ServerPlayer player, BlockState block, int[] box,
+    private static void nativeEdit(MinecraftServer server, ServerPlayer player, BaseBlock block, int[] box,
             Map<String, Object> result) {
         try {
             var world = FabricAdapter.adapt(server.overworld());
@@ -277,7 +317,7 @@ public final class S11Probe implements ModInitializer {
     private static volatile long CHANGE_AFTER;
 
     // FAWE's asynchronous coordinated API, submitted on the owner thread.
-    private static void bulkEdit(MinecraftServer server, ServerPlayer player, BlockState block, int[] box,
+    private static void bulkEdit(MinecraftServer server, ServerPlayer player, BaseBlock block, int[] box,
             Map<String, Object> result) {
         var context = new EditActorContext(player.getUUID(), player.getGameProfile().name(), EditActorContext.Source.API,
                 UUID.randomUUID(), null, null, "minecraft:overworld", SideEffectSet.none(), new EditActorContext.Cancellation());

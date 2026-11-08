@@ -10,6 +10,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,6 +26,8 @@ import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.AABB;
 
@@ -177,7 +180,9 @@ public abstract class NativeDriverMixin {
         }
         JsonArray displays = new JsonArray();
         // A display's box has no size and intersection is strict, so look past the cell edges.
-        AABB bounds = new AABB(x1 - 0.5, y1 - 0.5, z1 - 0.5, x2 + 1.5, y2 + 1.5, z2 + 1.5);
+        double padding = box.has("padding") ? box.get("padding").getAsDouble() : 0.5;
+        AABB bounds = new AABB(x1 - padding, y1 - padding, z1 - padding,
+            x2 + 1 + padding, y2 + 1 + padding, z2 + 1 + padding);
         for (Entity entity : level.getEntities((Entity) null, bounds, candidate -> candidate instanceof Display)) {
             JsonObject display = new JsonObject();
             display.addProperty("id", entity.getId());
@@ -186,12 +191,26 @@ public abstract class NativeDriverMixin {
             display.addProperty("shows", entity instanceof Display.BlockDisplay block
                 ? BlockStateParser.serialize(((BlockDisplayAccessor) block).faweTest$blockState())
                 : entity.getType().toString());
+            if (entity instanceof Display.ItemDisplay item) {
+                ItemStack stack = item.getSlot(0).get();
+                display.add("item", ItemStack.OPTIONAL_CODEC.encodeStart(
+                    level.registryAccess().createSerializationContext(JsonOps.INSTANCE), stack).getOrThrow());
+            }
+            if (entity instanceof Display.TextDisplay text && text.textRenderState() != null) {
+                display.addProperty("text", text.textRenderState().text().getString());
+            }
             displays.add(display);
+        }
+        JsonArray drops = new JsonArray();
+        for (Entity entity : level.getEntities((Entity) null, bounds, candidate -> candidate instanceof ItemEntity)) {
+            drops.add(ItemStack.CODEC.encodeStart(level.registryAccess().createSerializationContext(JsonOps.INSTANCE),
+                ((ItemEntity) entity).getItem()).getOrThrow());
         }
         JsonObject out = new JsonObject();
         out.addProperty("loaded", loaded);
         out.add("cells", cells);
         out.add("displays", displays);
+        out.add("drops", drops);
         return out;
     }
 
