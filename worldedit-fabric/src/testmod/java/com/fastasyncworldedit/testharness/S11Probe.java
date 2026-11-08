@@ -90,6 +90,18 @@ public final class S11Probe implements ModInitializer {
 
     private static String run(MinecraftServer server, String[] words) {
         switch (words[0]) {
+            case "catalog" -> {
+                var entries = new ArrayList<Map<String, Object>>();
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.forEach(block -> {
+                    var id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block);
+                    if (!id.getNamespace().equals(words[1])) return;
+                    entries.add(Map.of("id", id.toString(), "class", block.getClass().getName(),
+                            "state", net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(block.defaultBlockState()),
+                            "blockEntity", block.defaultBlockState().hasBlockEntity(),
+                            "supported", com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.supports(id.toString())));
+                });
+                return GSON.toJson(Map.of("blocks", entries));
+            }
             // watch x1 y1 z1 x2 y2 z2: reset the oracle and count from now; gameplay counts only inside.
             case "watch" -> {
                 S11Writes.watch(box(words, 1));

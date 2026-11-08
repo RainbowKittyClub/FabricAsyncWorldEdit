@@ -95,12 +95,12 @@ public class FabricBlockMaterial extends PassthroughBlockMaterial {
         return block.canBeReplaced();
     }
 
-    // The bundled block info lists only vanilla blocks, so a mod's chest would read as no container
-    // and a clipboard would drop its items.
+    // Core clipboard/filter paths use hasContainer for all NBT, including signs, not only inventories.
     @Override
     public boolean hasContainer() {
-        return LifecycleDeclarations.container(BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString())
-                || super.hasContainer();
+        String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
+        return LifecycleDeclarations.container(id)
+                || block.hasBlockEntity() && LifecycleDeclarations.supports(id) || super.hasContainer();
     }
 
 }

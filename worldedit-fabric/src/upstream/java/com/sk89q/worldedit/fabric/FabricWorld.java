@@ -421,6 +421,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             BlockState state = BlockState.get(before.id());
             String id = state.getBlockType().id();
             if (!com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.container(id)) {
+                if (com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.supports(id)) {
+                    return false;
+                }
                 throw new UnsupportedOperationException("No verified native inventory codec for " + id);
             }
             var cleared = before.nbt().thaw();
@@ -440,6 +443,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
             }
             String id = FabricAdapter.adapt(getWorld().getBlockState(pos)).getBlockType().id();
             if (!com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.container(id)) {
+                if (com.fastasyncworldedit.fabric.edit.LifecycleDeclarations.supports(id)) {
+                    return before;
+                }
                 throw new UnsupportedOperationException("No verified native inventory codec for " + id);
             }
             var cleared = before.nbt().thaw();

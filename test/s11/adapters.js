@@ -106,6 +106,7 @@ const doubleRows = double => {
 
 module.exports = ({ rig, check, paced }) => {
   const storage = require('./storage-data')({ rig, check })
+  const ppb = require('./ppb')({ rig, check })
   let client, chatCommand, select, watcher
   const packName = 'FaweShelfPack'
   const repo = path.resolve(__dirname, '../..')
@@ -350,6 +351,10 @@ module.exports = ({ rig, check, paced }) => {
       check('declared-containers', containers.every(id => byBlock[id].container) &&
         [...declared, ...undeclared].filter(id => !containers.includes(id)).every(id => !byBlock[id].container), lifecycle)
 
+      await startWatcher('ppb-pack')
+      await ppb.contract({ send, name, client, watcher, chat: chatCommand })
+      await rig.stop(watcher.entry)
+
       for (const subject of SUBJECTS) await subjectContract(subject, send, name)
       for (const double of DOUBLES) await doubleContract(double, send, name)
       await startWatcher('storage-pack')
@@ -370,6 +375,9 @@ module.exports = ({ rig, check, paced }) => {
     async restart (rig_, send, name, { client: restartedClient }) {
       client = restartedClient
       for (const z of BANDS) await send(bandOf(z))
+      await startWatcher('ppb-pack-restart')
+      await ppb.restart({ send, name, client, watcher })
+      await rig.stop(watcher.entry)
       // Reloaded chunks rebuild what the blocks give from the world; none may be lost or left over.
       for (const subject of SUBJECTS) {
         const rows = rowsOf(subject)

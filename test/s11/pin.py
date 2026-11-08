@@ -71,6 +71,8 @@ deps['player-portals'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/a
 # the container and bookshelf declarations, built after the 26.3 node's datagen.
 deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-containers/'
                                     'sensiblestorage-0.6.1+26.3.jar'))
+deps['polymer-patch-bundle'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ppb-fawe-lifecycle/'
+                                      'polymer-patch-bundle-1.1.7+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
