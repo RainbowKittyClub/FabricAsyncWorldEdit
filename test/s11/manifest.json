@@ -1429,8 +1429,8 @@
       "nested": []
     },
     "sensible-storage": {
-      "path": "/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-lifecycle/sensiblestorage-0.6.1+26.3.jar",
-      "sha256": "b65ca8813796b047a863710ccf3b043747bcfa8b8159bca0ebd145dbe3fbf7aa",
+      "path": "/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-bookshelves/sensiblestorage-0.6.1+26.3.jar",
+      "sha256": "ef5982210c39ef22b6f29814e6035967a9bfa31547d915854471b45d7f016054",
       "nested": []
     },
     "player-portals": {

@@ -6,10 +6,14 @@
 // vanilla-made rows are the reference; a deliberately wrong row proves the comparison can tell a
 // missing block from a right one. A subject is one declaring mod's block and what a client sees of
 // it: diagonal walls draw arm displays, a player-portals frame block gives light a stand-in cannot,
-// a planked chest has a display holder. A paste of a vanilla-made double chest with contents
+// a planked chest has a display holder; plain shelves retain their fallback or pack carrier and
+// enchanting-power tag. A paste of a vanilla-made double chest with contents
 // follows, since a half's holder looks for its partner. Blocks a mod leaves undeclared (the lit
 // portal block, the crafting table) must still be refused.
 
+const fs = require('node:fs')
+const path = require('node:path')
+const { startClient } = require('../harness/native')
 const { canonical, probe, differences, holdsItem } = require('./common')
 
 const Y = 80
@@ -50,6 +54,16 @@ const SUBJECTS = [
     z: 7064,
     // A chest's holder draws its base and lid as displays over the vanilla stand-in.
     ...arms
+  },
+  {
+    key: 'bookshelves',
+    block: 'sensiblestorage:spruce_bookshelf',
+    state: 'sensiblestorage:spruce_bookshelf',
+    z: 7192,
+    pack: true,
+    clipboard: true,
+    look: area => [...states(area), ...shown(area)],
+    shows: area => states(area).some(state => state !== 'minecraft:air')
   }
 ]
 // A vanilla-made double chest with contents, pasted: left half at the west, facing north.
@@ -91,11 +105,17 @@ const doubleRows = double => {
 }
 
 module.exports = ({ rig, check, paced }) => {
-  let client, chatCommand, select
+  let client, chatCommand, select, watcher
+  const packName = 'FaweShelfPack'
+  const repo = path.resolve(__dirname, '../..')
+  const startWatcher = async label => {
+    const port = Number(/^server-port=(\d+)$/m.exec(fs.readFileSync(path.join(rig.root, 'server/server.properties'), 'utf8'))[1])
+    watcher = await startClient(rig, repo, { name: packName, port, pack: true, label })
+  }
 
   // What the client holds for a band's rows, retried until the packets have all arrived.
-  const view = async rows => {
-    const answer = await client.send({ action: 'region', boxes: rows.view })
+  const view = async (rows, observer = client) => {
+    const answer = await observer.send({ action: 'region', boxes: rows.view })
     return answer.inWorld ? answer.boxes : null
   }
   const settle = async (subject, rows, name, send, { placed = [], removed = [], pairs = [], armed = [], bare = [] }) => {
@@ -106,22 +126,23 @@ module.exports = ({ rig, check, paced }) => {
         const problems = []
         for (const b of placed) if ((await differences(send, { box: corners(b), expect: subject.expect(b) })).length) problems.push(`server ${b.name} is not the pattern`)
         for (const b of removed) if ((await differences(send, { box: corners(b), expect: () => undefined })).length) problems.push(`server ${b.name} is not empty`)
-        const boxes = await view(rows)
-        if (!boxes) problems.push('client is not in the world')
-        else {
+        const views = { plain: await view(rows) }
+        if (subject.pack) views.pack = await view(rows, watcher)
+        for (const [audience, boxes] of Object.entries(views)) {
+          if (!boxes) { problems.push(`${audience} client is not in the world`); continue }
           // An unloaded box reads as air, which would pass every check of an empty row.
-          for (const b of rows.view) if (!boxes[b.name]?.loaded) problems.push(`client lacks ${b.name}`)
+          for (const b of rows.view) if (!boxes[b.name]?.loaded) problems.push(`${audience} client lacks ${b.name}`)
           for (const [a, b] of pairs) {
             if (!same(subject.look(boxes[a.name]), subject.look(boxes[b.name]))) {
-              problems.push(`${a.name} ${JSON.stringify(subject.look(boxes[a.name])).slice(0, 220)} differs from ${b.name} ${JSON.stringify(subject.look(boxes[b.name])).slice(0, 220)}`)
+              problems.push(`${audience} ${a.name} ${JSON.stringify(subject.look(boxes[a.name])).slice(0, 220)} differs from ${b.name} ${JSON.stringify(subject.look(boxes[b.name])).slice(0, 220)}`)
             }
           }
           for (const b of armed) if (!subject.shows(boxes[b.name])) problems.push(`${b.name} shows nothing of the block`)
           for (const b of bare) if (subject.shows(boxes[b.name])) problems.push(`${b.name} still shows the block`)
         }
-        last = { problems, boxes }
+        last = { problems, boxes: views.plain }
         return problems.length === 0
-      }, 40000, [client.entry])
+      }, 40000, [client.entry, ...(subject.pack ? [watcher.entry] : [])])
     } catch (error) {
       if (!/^Timeout waiting for/.test(error.message)) throw error
     }
@@ -148,6 +169,10 @@ module.exports = ({ rig, check, paced }) => {
     const { mirror, native, staticMirror, coordinated, apiNative, apiBulk, wrong, control } = rows
     const key = subject.key
     await send(`tp ${name} ${viewOf(subject.z)}`)
+    if (subject.pack) {
+      await startWatcher('shelves-pack')
+      await send(`tp ${packName} ${viewOf(subject.z)}`)
+    }
 
     // The references first: strict vanilla commands, the lifecycle every route must reproduce.
     await place(send, subject.block, mirror)
@@ -184,6 +209,20 @@ module.exports = ({ rig, check, paced }) => {
     check(`${key}:mirror-shows-the-block`, placed && subject.shows(placed[mirror.name]), placed && subject.look(placed[mirror.name]))
     check(`${key}:comparison-detects-a-missing-block`, placed && !same(subject.look(placed[wrong.name]), subject.look(placed[staticMirror.name])),
       placed && subject.look(placed[wrong.name]))
+    if (subject.pack) {
+      const packed = await view(rows, watcher)
+      check(`${key}:pack-uses-a-distinct-carrier`, packed && placed &&
+        !same(states(packed[mirror.name]), states(placed[mirror.name])) &&
+        CELLS.every(c => canonical(placed[mirror.name].cells.find(cell => cell.at === `${c[0]},0,${c[1]}`).state) === 'minecraft:bookshelf'),
+      packed && subject.look(packed[mirror.name]))
+      check(`${key}:pack-comparison-detects-a-missing-block`, packed &&
+        !same(subject.look(packed[wrong.name]), subject.look(packed[staticMirror.name])), packed && subject.look(packed[wrong.name]))
+      const power = []
+      for (const b of [mirror, ...fawe]) for (const c of CELLS) {
+        power.push(await send(`execute if block ${cellAt(b, c).join(' ')} #minecraft:enchantment_power_provider`))
+      }
+      check(`${key}:all-routes-retain-enchanting-power`, power.every(answer => answer === 'Test passed'), power)
+    }
 
     // Removal: a native //set air against vanilla's fill; what the block gave goes with it.
     await select(native)
@@ -195,6 +234,22 @@ module.exports = ({ rig, check, paced }) => {
     await settle(subject, rows, 'undo-restores-the-block', send, { placed: [native], pairs: [[native, staticMirror]], armed: [native] })
     await chatCommand('/redo', /Redid/)
     await settle(subject, rows, 'redo-removes-the-block', send, { removed: [native], pairs: [[native, mirror]], bare: [native] })
+    if (subject.clipboard) {
+      for (const b of [staticMirror, native]) await send(`setblock ${b.x1 - 1} ${Y - 1} ${b.z1} minecraft:stone`)
+      await select(staticMirror)
+      await send(`tp ${name} ${staticMirror.x1 - 0.5} ${Y} ${staticMirror.z1 + 0.5}`)
+      await chatCommand('/copy', /blocks were copied|blocks affected/)
+      await send(`tp ${name} ${native.x1 - 0.5} ${Y} ${native.z1 + 0.5}`)
+      await chatCommand('/paste', /clipboard has been pasted/)
+      await chatCommand('/clearclipboard', /Clipboard cleared/)
+      await send(`tp ${name} ${viewOf(subject.z)}`)
+      await settle(subject, rows, 'pasted-match-vanilla', send, { placed: [native], pairs: [[native, staticMirror]], armed: [native] })
+      await chatCommand('/undo', /Undid/)
+      await settle(subject, rows, 'paste-undo-removes-the-block', send, { removed: [native], pairs: [[native, mirror]], bare: [native] })
+      await chatCommand('/redo', /Redid/)
+      await settle(subject, rows, 'paste-redo-restores-the-block', send, { placed: [native], pairs: [[native, staticMirror]], armed: [native] })
+    }
+    if (subject.pack) await rig.stop(watcher.entry)
   }
 
   // The contents a double chest's two halves hold, and what each half reports when asked.
@@ -256,6 +311,12 @@ module.exports = ({ rig, check, paced }) => {
   }
 
   return {
+    clientOptions: { pack: false },
+    async configureServer (serverDir) {
+      fs.mkdirSync(path.join(serverDir, 'config/polymer'), { recursive: true })
+      fs.writeFileSync(path.join(serverDir, 'config/polymer/auto-host.json'), JSON.stringify({ enabled: true, required: false,
+        mod_override: false, resource_pack_status_dialog: false, allow_joining_after_generation_failure: false }))
+    },
     async contract (rig_, send, name, { client: playerClient, chatCommand: sendChatCommand }) {
       client = playerClient
       chatCommand = paced(send, client, sendChatCommand)
@@ -270,11 +331,11 @@ module.exports = ({ rig, check, paced }) => {
       // gets no support for it.
       const lifecycle = await probe(send, 'lifecycle minecraft:cobblestone_wall minecraft:oak_fence minecraft:glass_pane ' +
         'playerportals:void_infused_deepslate playerportals:portal sensiblestorage:oak_chest sensiblestorage:oak_trapped_chest ' +
-        'sensiblestorage:spruce_crafting_table sensiblestorage:spruce_bookshelf minecraft:stone minecraft:chest')
+        'sensiblestorage:spruce_crafting_table sensiblestorage:spruce_bookshelf sensiblestorage:spruce_chiseled_bookshelf minecraft:stone minecraft:chest')
       const byBlock = Object.fromEntries(lifecycle.blocks.map(entry => [entry.block, entry]))
       const declared = ['minecraft:cobblestone_wall', 'minecraft:oak_fence', 'minecraft:glass_pane', 'playerportals:void_infused_deepslate',
-        'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest']
-      const undeclared = ['playerportals:portal', 'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_bookshelf']
+        'sensiblestorage:oak_chest', 'sensiblestorage:oak_trapped_chest', 'sensiblestorage:spruce_bookshelf']
+      const undeclared = ['playerportals:portal', 'sensiblestorage:spruce_crafting_table', 'sensiblestorage:spruce_chiseled_bookshelf']
       check('declared-blocks-supported', declared.every(id => byBlock[id].supported) && lifecycle.declared > 0, lifecycle)
       check('declared-blocks-stay-per-cell', declared.every(id => !byBlock[id].direct) && byBlock['minecraft:stone'].direct, lifecycle)
       check('undeclared-blocks-unsupported', undeclared.every(id => !byBlock[id].supported && !byBlock[id].direct), lifecycle)
@@ -304,12 +365,18 @@ module.exports = ({ rig, check, paced }) => {
       for (const subject of SUBJECTS) {
         const rows = rowsOf(subject)
         const { mirror, native, staticMirror, coordinated, apiNative, apiBulk } = rows
-        const fawe = [coordinated, apiNative, apiBulk]
+        const fawe = [coordinated, apiNative, apiBulk, ...(subject.clipboard ? [native] : [])]
         await send(`tp ${name} ${viewOf(subject.z)}`)
+        if (subject.pack) {
+          await startWatcher('shelves-pack-restart')
+          await send(`tp ${packName} ${viewOf(subject.z)}`)
+        }
         await settle(subject, rows, 'restart-rebuilt', send, {
-          placed: [staticMirror, ...fawe], removed: [native, mirror],
-          pairs: [[native, mirror], ...fawe.map(b => [b, staticMirror])], armed: [staticMirror, ...fawe], bare: [native, mirror]
+          placed: [staticMirror, ...fawe], removed: subject.clipboard ? [mirror] : [native, mirror],
+          pairs: [...(subject.clipboard ? [] : [[native, mirror]]), ...fawe.map(b => [b, staticMirror])],
+          armed: [staticMirror, ...fawe], bare: subject.clipboard ? [mirror] : [native, mirror]
         })
+        if (subject.pack) await rig.stop(watcher.entry)
       }
       for (const double of DOUBLES) {
         const rows = doubleRows(double)

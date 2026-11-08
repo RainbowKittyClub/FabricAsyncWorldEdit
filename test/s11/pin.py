@@ -68,8 +68,8 @@ deps['diagonal-walls'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/a
 deps['player-portals'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/player-portals-fawe-lifecycle/'
                                   'playerportals-0.2.0+26.3.jar'))
 # Sensible storage with its fawe:lifecycle declaration (feat/fawe-lifecycle): the staged 0.6.1 jar plus
-# the planked-chest tag and that one field, built from the mod's 26.3 node after its datagen.
-deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-lifecycle/'
+# the planked-chest and plain-bookshelf tags and declaration, built after the 26.3 node's datagen.
+deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/sensible-storage-fawe-bookshelves/'
                                     'sensiblestorage-0.6.1+26.3.jar'))
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
