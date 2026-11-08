@@ -58,6 +58,18 @@ public interface EditIntegration {
     public interface Reservation {
 
         /**
+         * Pure owner-thread authority check before optimistic matching of absolute native targets.
+         * Returning false excludes a denied cell, not a stale before-image. Journal/intent checks
+         * belong in {@link #authorize}; their mismatch must conflict and retry instead of counting
+         * as a permission denial. The default opts out of early pruning; final authorization always
+         * runs before any write.
+         */
+        public default boolean authorizeFootprint(ServerLevel level, ServerPlayer operator,
+                EditActorContext context, EditDelta actualDelta) {
+            return true;
+        }
+
+        /**
          * Check current policy on the owner thread immediately before the bounded write.
          * The current player may be null only for explicitly supported administrative policy.
          * No blocking, asynchronous work or permission caching across calls is permitted here.

@@ -89,10 +89,25 @@ public final class FabricWorldAccess {
         }
         var values = attachments.fabric_getAttachments();
         if (values != null && !values.isEmpty()) {
-            var ids = values.keySet().stream().map(type -> type.identifier().toString()).sorted().toList();
-            throw new UnsupportedOperationException("Attachment lifecycle/restore codecs are not installed for "
-                    + describe(target) + " " + ids);
+            var ids = values.keySet().stream().map(type -> type.identifier().toString())
+                    .filter(id -> !(target instanceof LevelChunk chunk)
+                            || !PositionDataRegistry.get(((ServerLevel) chunk.getLevel()).getServer()).owns(id))
+                    .sorted().toList();
+            if (!ids.isEmpty()) {
+                throw new UnsupportedOperationException("Attachment lifecycle/restore codecs are not installed for "
+                        + describe(target) + " " + ids);
+            }
         }
+    }
+
+    /** Preserve fail-closed attachment checks for native full-block/clipboard reads too. */
+    public static void refuseAttachmentsForRead(ServerLevel level, BlockPos pos) {
+        if (!level.getServer().isSameThread()) throw new IllegalStateException("Native reads require the owner thread");
+        LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+        if (chunk == null) throw new IllegalStateException("Native read chunk is not loaded at " + pos);
+        refuseAttachments(chunk);
+        var entity = chunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+        if (entity != null) refuseAttachments(entity);
     }
 
     private static String describe(Object target) {
@@ -246,7 +261,8 @@ public final class FabricWorldAccess {
 
     /** Whether either side of this delta holds a block entity; such cells count against the 64. */
     public boolean blockEntityCell(EditDelta delta) {
-        return delta.kind() == EditDelta.Kind.BLOCK && (mapping.nativeState(delta.before().id()).hasBlockEntity()
+        return delta.kind() == EditDelta.Kind.BLOCK && (delta.before().nbt() != null || delta.after().nbt() != null
+                || mapping.nativeState(delta.before().id()).hasBlockEntity()
                 || mapping.nativeState(delta.after().id()).hasBlockEntity());
     }
 
@@ -268,12 +284,13 @@ public final class FabricWorldAccess {
                         if (!LifecycleDeclarations.supports(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) {
                             throw new UnsupportedBlockException(value.id(), delta.x(), delta.y(), delta.z());
                         }
-                        if (value.nbt() != null && !state.hasBlockEntity()) {
+                        if (PositionDataTransport.blockEntity(value.nbt()) != null && !state.hasBlockEntity()) {
                             throw new IllegalArgumentException("NBT on a block without a block entity");
                         }
+                        PositionDataRegistry.get(server).prepare(level, state,
+                                PositionDataTransport.positions(value.nbt()));
                     }
-                    if (mapping.nativeState(delta.before().id()).hasBlockEntity()
-                            || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+                    if (blockEntityCell(delta)) {
                         heavy++;
                     }
                 }
@@ -308,8 +325,9 @@ public final class FabricWorldAccess {
                 if (blockEntity != null) {
                     refuseAttachments(blockEntity);
                 }
-                yield new EditValue(FabricAdapter.adapt(state).getAsString(), blockEntity == null ? null
-                        : FrozenNbt.capture(blockEntity.saveWithFullMetadata(level.registryAccess())));
+                yield new EditValue(FabricAdapter.adapt(state).getAsString(), PositionDataTransport.combine(
+                        blockEntity == null ? null : blockEntity.saveWithFullMetadata(level.registryAccess()),
+                        PositionDataRegistry.get(server).read(level, pos, state)));
             }
             case BIOME -> new EditValue(chunk.getNoiseBiome(x >> 2, y >> 2, z >> 2)
                     .unwrapKey().orElseThrow().identifier().toString(), null);
@@ -337,6 +355,10 @@ public final class FabricWorldAccess {
             }
             if (chunk == null) {
                 chunk = loadedChunk(level, delta.x() >> 4, delta.z() >> 4);
+                var attachments = ((net.fabricmc.fabric.impl.attachment.AttachmentTargetImpl) chunk)
+                        .fabric_getAttachments();
+                // Portable owners use normal lifecycle hooks, not Polymer's bulk participant route.
+                if (attachments != null && !attachments.isEmpty()) return false;
             } else if (delta.x() >> 4 != chunk.getPos().x() || delta.z() >> 4 != chunk.getPos().z()) {
                 return false;
             }
@@ -355,6 +377,7 @@ public final class FabricWorldAccess {
         List<List<EditDelta>> units = new ArrayList<>();
         for (EditDelta delta : deltas) {
             if (delta.kind() == EditDelta.Kind.BLOCK
+                    && delta.before().nbt() == null && delta.after().nbt() == null
                     && !mapping.nativeState(delta.before().id()).hasBlockEntity()
                     && !mapping.nativeState(delta.after().id()).hasBlockEntity()) {
                 sections.computeIfAbsent(delta.y() >> 4, ignored -> new ArrayList<>()).add(delta);
@@ -499,8 +522,9 @@ public final class FabricWorldAccess {
         var nativeAccess = new com.sk89q.worldedit.fabric.internal.FabricWorldNativeAccess(
                 new java.lang.ref.WeakReference<>(level));
         var state = com.sk89q.worldedit.world.block.BlockState.get(delta.after().id());
-        var block = delta.after().nbt() == null ? state.toBaseBlock() : state.toBaseBlock(
-                com.sk89q.worldedit.fabric.internal.NBTConverter.fromNative(delta.after().nbt().thaw()));
+        var nbt = PositionDataTransport.blockEntity(delta.after().nbt());
+        var block = nbt == null ? state.toBaseBlock() : state.toBaseBlock(
+                com.sk89q.worldedit.fabric.internal.NBTConverter.fromNative(nbt));
         BlockPos pos = new BlockPos(delta.x(), delta.y(), delta.z());
         if (effects.shouldApply(SideEffect.VALIDATION)) {
             // Corrected against the cells written so far; a correction to an unsupported block is left out.
@@ -514,6 +538,8 @@ public final class FabricWorldAccess {
             }
             effects = effects.with(SideEffect.VALIDATION, SideEffect.State.OFF);
         }
+        var restore = PositionDataRegistry.get(server).prepare(level,
+                FabricAdapter.adapt(block.toImmutableState()), PositionDataTransport.positions(delta.after().nbt()));
         try {
             // Same-type state changes retain NBT; history replays tile data before block properties.
             var tile = level.getBlockEntity(pos);
@@ -524,6 +550,7 @@ public final class FabricWorldAccess {
             }
             nativeAccess.setBlock(com.sk89q.worldedit.math.BlockVector3.at(delta.x(), delta.y(), delta.z()),
                     block, effects);
+            restore.accept(pos);
         } catch (com.sk89q.worldedit.WorldEditException failure) {
             throw new IllegalStateException(failure);
         }
@@ -537,18 +564,22 @@ public final class FabricWorldAccess {
             case BLOCK -> {
                 var oldState = chunk.getBlockState(pos);
                 var state = mapping.nativeState(delta.after().id());
+                var nbt = PositionDataTransport.blockEntity(delta.after().nbt());
+                var restore = PositionDataRegistry.get(server).prepare(level, state,
+                        PositionDataTransport.positions(delta.after().nbt()));
                 chunk.setBlockState(pos, state, Block.UPDATE_SKIP_ALL_SIDEEFFECTS);
                 if (state.hasBlockEntity()) {
                     var entity = chunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
                     if (entity == null) {
                         throw new IllegalStateException("Block entity was not created for " + pos);
                     }
-                    if (delta.after().nbt() != null) {
+                    if (nbt != null) {
                         entity.loadWithComponents(TagValueInput.create(ProblemReporter.DISCARDING,
-                                level.registryAccess(), delta.after().nbt().thaw()));
+                                level.registryAccess(), nbt));
                         entity.setChanged();
                     }
                 }
+                restore.accept(pos);
                 if (effects.shouldApply(SideEffect.POI_UPDATE)) {
                     level.updatePOIOnBlockStateChange(pos, oldState, state);
                 }
@@ -569,7 +600,8 @@ public final class FabricWorldAccess {
 
     // Whether a block may be installed into a section directly: no mod hook is skipped for it.
     private static boolean directSafe(net.minecraft.world.level.block.state.BlockState state) {
-        return LifecycleDeclarations.directSafe(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        return !PositionDataRegistry.portable(state)
+                && LifecycleDeclarations.directSafe(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     // Workers may only use detached snapshots; even a loaded live read is forbidden.

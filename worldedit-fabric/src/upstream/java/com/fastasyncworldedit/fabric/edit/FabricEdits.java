@@ -68,7 +68,10 @@ public final class FabricEdits {
         FabricRegionCommands.initialize();
         FabricChunkTickets.register();
         // Mods' lifecycle declarations name tags, which are bound only once the server has loaded them.
-        ServerLifecycleEvents.SERVER_STARTED.register(server -> LifecycleDeclarations.refresh());
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            LifecycleDeclarations.refresh();
+            PositionDataRegistry.get(server);
+        });
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> LifecycleDeclarations.refresh());
         ServerLifecycleEvents.START_DATA_PACK_RELOAD.register((server, resources) -> {
             if (active != null && active.server == server) {
@@ -100,6 +103,7 @@ public final class FabricEdits {
             }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            PositionDataRegistry.stop(server);
             if (active != null && active.server == server) {
                 active = null;
             }
@@ -138,8 +142,9 @@ public final class FabricEdits {
         var level = access.level(context.dimension());
         // Full images may reach detached provider preparation only after sensitive-read authorization.
         var chunk = level.getChunk(pos.x() >> 4, pos.z() >> 4);
-        if (kind == EditDelta.Kind.BLOCK && chunk.getBlockEntity(
-                new net.minecraft.core.BlockPos(pos.x(), pos.y(), pos.z())) != null) {
+        var nativePos = new net.minecraft.core.BlockPos(pos.x(), pos.y(), pos.z());
+        if (kind == EditDelta.Kind.BLOCK && (chunk.getBlockEntity(nativePos) != null
+                || PositionDataRegistry.portable(chunk.getBlockState(nativePos)))) {
             com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, pos.x() >> 4, pos.z() >> 4);
         }
         EditValue before = access.read(level, kind, pos.x(), pos.y(), pos.z(), "");
@@ -243,8 +248,9 @@ public final class FabricEdits {
         private List<List<EditDelta>> snapshot(List<NativeCell> cells) {
             var chunk = access.loadedChunk(level, chunkX, chunkZ);
             for (NativeCell cell : cells) {
-                if (cell.kind() == EditDelta.Kind.BLOCK && chunk.getBlockEntity(
-                        new net.minecraft.core.BlockPos(cell.x(), cell.y(), cell.z())) != null) {
+                var pos = new net.minecraft.core.BlockPos(cell.x(), cell.y(), cell.z());
+                if (cell.kind() == EditDelta.Kind.BLOCK && (chunk.getBlockEntity(pos) != null
+                        || PositionDataRegistry.portable(chunk.getBlockState(pos)))) {
                     com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, chunkX, chunkZ);
                     break;
                 }

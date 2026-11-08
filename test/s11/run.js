@@ -16,7 +16,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestFile))
 const evidence = '/mnt/WORKSPACE/scratchpad/fawe-s11-evidence'
 const [suite, base] = process.argv.slice(2)
 const SUITES = { functional: './functional', operations: './operations', content: './content', throughput: './throughput',
-  claims: './claims', ledger: './ledger', polymer: './polymer', adapters: './adapters' }
+  claims: './claims', ledger: './ledger', polymer: './polymer', adapters: './adapters', positions: './position-suite' }
 if (!SUITES[suite]) throw new Error(`Unknown S11 suite ${suite}`)
 const profile = `${suite}-${base}`
 if (!manifest.profiles[profile]) throw new Error(`Unknown S11 profile ${profile}`)
@@ -36,8 +36,9 @@ async function main () {
     if (!/^eula=true\s*$/m.test(fs.readFileSync(verify(manifest.eula), 'utf8'))) throw new GateError('Authorized EULA missing', 2)
     for (const binary of ['java', 'javac', 'jar', 'Xvfb', 'xauth', 'vulkaninfo']) tool('sh', ['-c', 'command -v "$1"', 'sh', binary])
     if (!process.env.TMPDIR || !process.env.VK_DRIVER_FILES || !fs.existsSync(process.env.VK_DRIVER_FILES)) throw new GateError('Use pinned Nix shell', 2)
-    report.sourceHashes = Object.fromEntries(['test/s11/run.js', `test/s11/${suite}.js`, 'test/s11/common.js', 'test/s11/pin.py',
+    report.sourceHashes = Object.fromEntries(['test/s11/run.js', `test/s11/${suite === 'positions' ? 'position-suite' : suite}.js`, 'test/s11/common.js', 'test/s11/pin.py',
       ...(suite === 'adapters' ? ['test/s11/storage-data.js', 'test/s11/ppb.js'] : []),
+      ...(['adapters', 'positions'].includes(suite) ? ['test/s11/position-data.js'] : []),
       'test/harness/smoke.js', 'test/harness/native.js', 'test/harness/postgres.js', 'test/harness/ledgerdb.js']
       .map(name => [name, hash(path.join(repo, name))]))
     lease = new SingleLaneLease()

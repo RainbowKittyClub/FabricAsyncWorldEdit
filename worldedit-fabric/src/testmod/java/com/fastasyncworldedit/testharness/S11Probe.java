@@ -49,6 +49,7 @@ public final class S11Probe implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        PositionDataProbe.initialize();
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.START_SERVER_TICK.register(server -> {
             String deop = DEOP;
             if (deop != null && FabricEdits.nativeService(server).publicationTimeline().stream()
@@ -90,6 +91,9 @@ public final class S11Probe implements ModInitializer {
 
     private static String run(MinecraftServer server, String[] words) {
         switch (words[0]) {
+            case "positions" -> {
+                return GSON.toJson(PositionDataProbe.run(server, words));
+            }
             case "catalog" -> {
                 var entries = new ArrayList<Map<String, Object>>();
                 net.minecraft.core.registries.BuiltInRegistries.BLOCK.forEach(block -> {

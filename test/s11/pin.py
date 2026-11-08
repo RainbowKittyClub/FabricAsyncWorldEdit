@@ -73,24 +73,28 @@ deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence
                                     'sensiblestorage-0.6.1+26.3.jar'))
 deps['polymer-patch-bundle'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ppb-fawe-lifecycle/'
                                       'polymer-patch-bundle-1.1.7+26.3.jar'))
+bridge_root = Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/position-data-bridges')
+deps['chopt-position-data'] = pin(bridge_root / 'chopt-0.1.1-fawe.2+26.3.jar')
+deps['terraform-position-data-bridge'] = pin(bridge_root / 'terraform-position-data-api-v1-18.0.0-rkc.3-fawe.1+26.3.jar')
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its
 # fixture: s6-probe for claims, and the polymer fixture, whose overlays sit on vanilla chests and logs.
 stack = ['candidate', 'fabric-api-polymer', 'lifecycle-probe', 'polymer-accepted', *audit, 'test-permissions',
-         'lithium', 'c2me', 'diagonal-walls', 'sensible-storage', 'player-portals', 'terrestria', 'polymer-patch-bundle']
+          'lithium', 'c2me', 'diagonal-walls', 'sensible-storage', 'player-portals', 'terrestria', 'polymer-patch-bundle',
+          'chopt-position-data', 'terraform-position-data-bridge']
 # Throughput with only Ledger and OPAC added to the base set: tells their cost from the rest of the stack.
 manifest['profiles']['throughput-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
 manifest['profiles']['throughput-opac'] = ['candidate', 'fabric-api', 'lifecycle-probe', 'opac', 'forge-config']
 fixtures = {'claims': ['s6-probe'], 'polymer': ['polymer-fixture']}
-for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters'):
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters', 'positions'):
     for base, extra in (('full', ['scalablelux']), ('vanilla-light', [])):
         manifest['profiles'][f'{suite}-{base}'] = [*stack, *extra, *fixtures.get(suite, [])]
 # backend-db: the full stack with Ledger's Postgres extension (the jar the previous network ran,
 # 1.2.2, taken from the server-data history), against a disposable Postgres 18 container.
 deps['ledger-databases'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ledger-databases-1.2.2/'
                                     'ledger-databases-1.2.2.jar'))
-for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters'):
+for suite in ('functional', 'operations', 'content', 'throughput', 'claims', 'ledger', 'polymer', 'adapters', 'positions'):
     manifest['profiles'][f'{suite}-backend-db'] = [*manifest['profiles'][f'{suite}-full'], 'ledger-databases']
 # These profiles now run; only Paper, the throughput reference, is still to provision.
 manifest['unavailableProfiles'] = [name for name in manifest['unavailableProfiles']

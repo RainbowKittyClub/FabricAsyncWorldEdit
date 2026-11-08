@@ -100,6 +100,7 @@ public class FabricBlockMaterial extends PassthroughBlockMaterial {
     public boolean hasContainer() {
         String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
         return LifecycleDeclarations.container(id)
+                || com.fastasyncworldedit.fabric.edit.PositionDataRegistry.portable(block)
                 || block.hasBlockEntity() && LifecycleDeclarations.supports(id) || super.hasContainer();
     }
 

@@ -71,6 +71,8 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
         biomes = new BiomeType[sections.length][64];
         sky = new byte[sections.length][4096];
         light = new byte[sections.length][4096];
+        Map<BlockVector3, FrozenNbt> tiles = new HashMap<>();
+        var positionData = PositionDataRegistry.get(level.getServer());
         for (int section = 0; section < sections.length; section++) {
             int baseY = minY + (section << 4);
             for (int index = 0; index < 4096; index++) {
@@ -78,7 +80,16 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
                 int y = baseY + (index >> 8);
                 int z = (index >> 4) & 15;
                 BlockPos pos = new BlockPos((chunkX << 4) + x, y, (chunkZ << 4) + z);
-                sections[section][index] = mapping.ordinal(chunk.getBlockState(pos));
+                var nativeState = chunk.getBlockState(pos);
+                sections[section][index] = mapping.ordinal(nativeState);
+                if (positionData.holds(nativeState)) {
+                    FrozenNbt portable = PositionDataTransport.combine(null, positionData.read(level, pos, nativeState));
+                    retained += portable.estimatedBytes() + 128L;
+                    if (retained > byteBudget) {
+                        throw new IllegalArgumentException("Snapshot position data exceeds admission budget");
+                    }
+                    tiles.put(BlockVector3.at(x, y, z), portable);
+                }
                 sky[section][index] = (byte) level.getBrightness(LightLayer.SKY, pos);
                 light[section][index] = (byte) level.getBrightness(LightLayer.BLOCK, pos);
             }
@@ -88,7 +99,6 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
                 biomes[section][index] = java.util.Objects.requireNonNull(BiomeTypes.get(id), "Unmapped biome " + id);
             }
         }
-        Map<BlockVector3, FrozenNbt> tiles = new HashMap<>();
         for (BlockPos pos : chunk.getBlockEntitiesPos()) {
             var entity = chunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
             if (entity != null) {
@@ -97,12 +107,13 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
                 if (nbt.sizeInBytes() > 65536) {
                     throw new UnsupportedOperationException("Snapshot block entity exceeds 64 KiB");
                 }
-                FrozenNbt frozen = FrozenNbt.capture(nbt);
+                BlockVector3 key = BlockVector3.at(pos.getX() & 15, pos.getY(), pos.getZ() & 15);
+                FrozenNbt frozen = PositionDataTransport.combine(nbt, PositionDataTransport.positions(tiles.get(key)));
                 retained += frozen.estimatedBytes() + 128L;
                 if (retained > byteBudget) {
                     throw new IllegalArgumentException("Snapshot NBT exceeds admission budget");
                 }
-                tiles.put(BlockVector3.at(pos.getX() & 15, pos.getY(), pos.getZ() & 15), frozen);
+                tiles.put(key, frozen);
             }
         }
         blockEntities = Map.copyOf(tiles);
@@ -181,7 +192,8 @@ public final class FabricGetBlocks implements CoordinatedChunkGet {
         if (chunk == null) {
             throw new IllegalStateException("Snapshot chunk is not loaded");
         }
-        if (!chunk.getBlockEntitiesPos().isEmpty()) {
+        if (!chunk.getBlockEntitiesPos().isEmpty() || java.util.Arrays.stream(chunk.getSections())
+                .anyMatch(section -> section.maybeHas(PositionDataRegistry::portable))) {
             com.fastasyncworldedit.fabric.compat.NativeClaims.snapshot(level, context, chunkX, chunkZ);
         }
         return new FabricGetBlocks(chunk, level, mapping, submitter, byteBudget);

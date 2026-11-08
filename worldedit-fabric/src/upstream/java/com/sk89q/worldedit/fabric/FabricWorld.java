@@ -377,7 +377,9 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
                         target.toImmutableState().getAsString(), position.x(), position.y(), position.z()));
                 return false;
             }
-            if (held != null && target.getNbt() == null && FabricAdapter.adapt(target.toImmutableState()).hasBlockEntity()) {
+            if (held != null && target.getNbt() == null && (FabricAdapter.adapt(target.toImmutableState()).hasBlockEntity()
+                    || com.fastasyncworldedit.fabric.edit.PositionDataTransport.positions(
+                            FrozenNbt.capture(NBTConverter.toNative(held.linTag()))) != null)) {
                 target = target.toImmutableState().toBaseBlock(held.linTag());
             }
             writer.write(EditDelta.Kind.BLOCK, position.x(), position.y(), position.z(), editValue(target), target,
@@ -901,7 +903,8 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
         }
         return com.fastasyncworldedit.fabric.edit.NativeSessionWriter.onServer(getWorld().getServer(), () -> {
             BlockPos pos = FabricAdapter.toBlockPos(position);
-            if (getWorld().getBlockEntity(pos) != null) {
+            if (getWorld().getBlockEntity(pos) != null
+                    || com.fastasyncworldedit.fabric.edit.PositionDataRegistry.portable(getWorld().getBlockState(pos))) {
                 NativeClaims.snapshot((ServerLevel) getWorld(), editContext, position.x() >> 4, position.z() >> 4);
             }
             EditValue value = nativeValue(pos);
@@ -993,9 +996,14 @@ public class FabricWorld extends AbstractWorld implements com.sk89q.worldedit.wo
 
     // Only owner-thread mutation/history code sees this ungated before image.
     private EditValue nativeValue(BlockPos pos) {
+        com.fastasyncworldedit.fabric.edit.FabricWorldAccess.refuseAttachmentsForRead((ServerLevel) getWorld(), pos);
         BlockEntity tile = getWorld().getBlockEntity(pos);
-        return new EditValue(FabricAdapter.adapt(getWorld().getBlockState(pos)).getAsString(), tile == null
-                ? null : FrozenNbt.capture(tile.saveWithFullMetadata(getWorld().registryAccess())));
+        var state = getWorld().getBlockState(pos);
+        return new EditValue(FabricAdapter.adapt(state).getAsString(),
+                com.fastasyncworldedit.fabric.edit.PositionDataTransport.combine(
+                        tile == null ? null : tile.saveWithFullMetadata(getWorld().registryAccess()),
+                        com.fastasyncworldedit.fabric.edit.PositionDataRegistry.get(getWorld().getServer())
+                                .read((ServerLevel) getWorld(), pos, state)));
     }
 
     @Override

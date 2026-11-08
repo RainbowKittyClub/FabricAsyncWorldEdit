@@ -104,6 +104,12 @@ public final class OpacAuthorizer implements EditIntegration {
         }
 
         @Override
+        public boolean authorizeFootprint(ServerLevel level, ServerPlayer operator, EditActorContext context,
+                EditDelta actualDelta) {
+            return authorize(level, operator, context, actualDelta);
+        }
+
+        @Override
         public boolean authorize(ServerLevel level, ServerPlayer operator, EditActorContext context,
                 EditDelta actualDelta) {
             if (actualDelta.kind() != EditDelta.Kind.BLOCK && actualDelta.kind() != EditDelta.Kind.BIOME) {

@@ -453,7 +453,34 @@ public final class FabricCommitCoordinator {
                 }
                 boolean rebase = unit.rebase
                         && unit.reservations.stream().allMatch(EditIntegration.Reservation::acceptsChangedBefore);
-                if (!access.matches(proposal, level, !unit.nativeMutation, rebase)) {
+                PreparedChunkEdit matching = proposal;
+                if (unit.nativeMutation && unit.rebase) {
+                    List<EditDelta> eligible = new ArrayList<>();
+                    var ignored = new java.util.HashSet<NativeBefore>();
+                    for (EditDelta delta : proposal.writes()) {
+                        EditValue before = access.read(level, delta);
+                        EditDelta actual = new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(),
+                                delta.key(), before, delta.after());
+                        boolean allowed = true;
+                        if (!actual.isNoOp()) {
+                            for (EditIntegration.Reservation reservation : unit.reservations) {
+                                allowed &= reservation.authorizeFootprint(level, player, proposal.context(), actual);
+                            }
+                        }
+                        if (allowed) {
+                            eligible.add(delta);
+                        } else {
+                            denied++;
+                            // Absolute native targets do not depend on denied plain before-values.
+                            // Keep sensitive NBT reads, and any observation not duplicating this write.
+                            if (delta.before().nbt() == null) ignored.add(NativeBefore.of(delta));
+                        }
+                    }
+                    matching = new PreparedChunkEdit(proposal.context(), proposal.chunkX(), proposal.chunkZ(),
+                            proposal.registryGeneration(), proposal.reads().stream()
+                                    .filter(read -> !ignored.contains(NativeBefore.of(read))).toList(), eligible);
+                }
+                if (!access.matches(matching, level, !unit.nativeMutation, rebase)) {
                     outcome = CommitReceipt.Outcome.CONFLICT;
                 } else {
                     if (!unit.nativeMutation) {
@@ -461,7 +488,7 @@ public final class FabricCommitCoordinator {
                     } else {
                         access.validateNative(proposal, level);
                     }
-                    for (EditDelta delta : proposal.writes()) {
+                    for (EditDelta delta : matching.writes()) {
                         EditValue before = access.read(level, delta);
                         EditDelta actual = new EditDelta(delta.kind(), delta.x(), delta.y(), delta.z(),
                                 delta.key(), before, delta.after());
@@ -518,7 +545,7 @@ public final class FabricCommitCoordinator {
                     for (EditIntegration.Reservation reservation : unit.reservations) {
                         reservation.beforePublication(level, finalWrite, directSections);
                     }
-                    if (!access.matches(proposal, level, !unit.nativeMutation, rebase)) {
+                    if (!access.matches(matching, level, !unit.nativeMutation, rebase)) {
                         throw new IllegalStateException("A prepublication callback changed the read footprint");
                     }
                     // Callbacks run once every cell is written, so none sees a half-written unit.
@@ -595,6 +622,17 @@ public final class FabricCommitCoordinator {
         if (!applied.isEmpty()) reached(unit, "published");
         unit.publishedNanos = System.nanoTime();
         finalizeUnit(unit, level, receipt, failure);
+    }
+
+    // Identifies only redundant intended-before reads, not revisions or other pattern observations.
+    private record NativeBefore(EditDelta.Kind kind, int x, int y, int z, String key, EditValue value) {
+        private static NativeBefore of(EditDelta delta) {
+            return new NativeBefore(delta.kind(), delta.x(), delta.y(), delta.z(), delta.key(), delta.before());
+        }
+
+        private static NativeBefore of(PreparedChunkEdit.ReadDependency read) {
+            return new NativeBefore(read.kind(), read.x(), read.y(), read.z(), read.key(), read.value());
+        }
     }
 
     // A maintenance/recording failure is never allowed to resubmit a world mutation.

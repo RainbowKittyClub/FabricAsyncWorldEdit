@@ -182,6 +182,11 @@ final class LedgerReplayGuard implements ReplayGuard {
                 var blocks = server.registryAccess().lookupOrThrow(Registries.BLOCK);
                 BlockState old = block.oldBlockState(blocks);
                 BlockState now = block.newBlockState(blocks);
+                // Native Ledger rows have no portable before/after values; they cannot restore a mark.
+                if (com.fastasyncworldedit.fabric.edit.PositionDataRegistry.portable(old)
+                        || com.fastasyncworldedit.fabric.edit.PositionDataRegistry.portable(now)) {
+                    return null;
+                }
                 // Ledger keeps the NBT of the side its own replay loads: the old block for a rollback
                 // of a break or change, the new block for a restore of a placement.
                 boolean nbtOnTarget = rollback ? !action.getIdentifier().equals("block-place")
