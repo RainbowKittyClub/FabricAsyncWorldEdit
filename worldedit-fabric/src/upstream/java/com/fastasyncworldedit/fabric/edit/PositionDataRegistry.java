@@ -27,6 +27,7 @@ public final class PositionDataRegistry {
     private static final Set<String> FIELDS = Set.of("id", "version", "holds", "read", "prepare");
     private final MinecraftServer server;
     private final Map<String, Codec> codecs;
+    private final Set<String> emptyStable;
 
     /** Resolve this running server's owner snapshot without recovering a worker-thread actor. */
     public static PositionDataRegistry get(MinecraftServer server) {
@@ -55,6 +56,7 @@ public final class PositionDataRegistry {
         this.server = server;
         owner();
         Map<String, Codec> registered = new LinkedHashMap<>();
+        Map<String, String> providers = new LinkedHashMap<>();
         for (var entry : FabricLoader.getInstance().getEntrypointContainers("fawe:position_data", Supplier.class)) {
             Object declarations = entry.getEntrypoint().get();
             if (!(declarations instanceof List<?> list)) {
@@ -66,12 +68,44 @@ public final class PositionDataRegistry {
                 if (registered.putIfAbsent(codec.id(), codec) != null) {
                     throw new IllegalArgumentException("Duplicate position-data owner: " + codec.id());
                 }
+                providers.put(codec.id(), entry.getProvider().getMetadata().getId());
                 if (registered.size() > 256) {
                     throw new IllegalArgumentException("More than 256 position-data owners");
                 }
             }
         }
         codecs = java.util.Collections.unmodifiableMap(registered);
+        Set<String> stable = new java.util.HashSet<>();
+        for (var entry : FabricLoader.getInstance().getEntrypointContainers(
+                "fawe:position_data_empty_stable", Supplier.class)) {
+            Object declarations = entry.getEntrypoint().get();
+            if (!(declarations instanceof List<?> list)) {
+                throw new IllegalArgumentException("Invalid empty-stable position-data declaration");
+            }
+            for (Object declaration : list) {
+                if (!(declaration instanceof String id)
+                        || !entry.getProvider().getMetadata().getId().equals(providers.get(id))) {
+                    throw new IllegalArgumentException("Empty-stable declaration must name its own codec: " + declaration);
+                }
+                stable.add(id);
+            }
+        }
+        emptyStable = Set.copyOf(stable);
+    }
+
+    /**
+     * Whether every matching owner explicitly permits skipping cleanup hooks with no stored data.
+     * Callers must also prove the entire chunk has no attachments and no proposed present values.
+     */
+    public static boolean stableWhenEmpty(BlockState state) {
+        PositionDataRegistry current = active;
+        return current == null || current.codecs.values().stream().allMatch(codec ->
+                !codec.holds().test(state) || current.emptyStable.contains(codec.id()));
+    }
+
+    /** The explicit opt-ins, for diagnostics; absent declarations always retain the native route. */
+    public Set<String> emptyStableOwners() {
+        return emptyStable;
     }
 
     /** Whether this exact chunk attachment has a registered portable owner. */

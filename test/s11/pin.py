@@ -73,9 +73,9 @@ deps['sensible-storage'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence
                                     'sensiblestorage-0.6.1+26.3.jar'))
 deps['polymer-patch-bundle'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ppb-fawe-lifecycle/'
                                       'polymer-patch-bundle-1.1.7+26.3.jar'))
-bridge_root = Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/position-data-bridges')
-deps['chopt-position-data'] = pin(bridge_root / 'chopt-0.1.1-fawe.2+26.3.jar')
-deps['terraform-position-data-bridge'] = pin(bridge_root / 'terraform-position-data-api-v1-18.0.0-rkc.3-fawe.1+26.3.jar')
+bridge_root = Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/position-data-empty-stable-v2')
+deps['chopt-position-data'] = pin(bridge_root / 'chopt-0.1.1-fawe.3+26.3.jar')
+deps['terraform-position-data-bridge'] = pin(bridge_root / 'terraform-position-data-api-v1-18.0.0-rkc.3-fawe.3+26.3.jar')
 # Increment 6: the deployment stack. Every suite runs against OPAC, Ledger with UniversalLedger, the
 # accepted Polymer, Lithium and C2ME, and the content mods staged for the server; 'full' adds
 # ScalableLux, 'vanilla-light' leaves lighting to vanilla. Only the suite that needs one gets its

@@ -222,6 +222,8 @@ module.exports = ({ rig, check, paced, claimed }) => {
 
       // The player's command is asked again per cell: losing it part-way stops the rest, and the
       // history holds exactly what was written.
+      const revokeHistoryBefore = JSON.parse(await send(`fawes10 history ${name}`)).entries.at(-1)?.operation
+      const revokeBefore = (await probe(send, `dump ${REVOKE.join(' ')}`)).runs.flatMap(([state, n]) => Array(n).fill(state))
       await select(...REVOKE)
       const chatOffset = fs.statSync(client.entry.log).size
       await client.send({ action: 'command', command: '/set stripped_oak_log' })
@@ -249,9 +251,25 @@ module.exports = ({ rig, check, paced, claimed }) => {
       let entry
       await rig.wait('revoked edit remembered', async () => {
         entry = JSON.parse(await send(`fawes10 history ${name}`)).entries.at(-1)
-        return entry && entry.size === revoked
+        return entry && entry.operation !== revokeHistoryBefore
       }, 10000, [client.entry]).catch(() => {})
-      check('revoked-history-exact', entry && entry.size === revoked, entry)
+      const historyCells = await probe(send, `history-cells ${name}`)
+      const revokeAfter = (await probe(send, `dump ${REVOKE.join(' ')}`)).runs.flatMap(([state, n]) => Array(n).fill(state))
+      const expectedCells = new Map()
+      for (let z = REVOKE[2]; z <= REVOKE[5]; z++) {
+        const i = z - REVOKE[2]
+        if (revokeAfter[i] !== revokeBefore[i]) expectedCells.set(`${REVOKE[0]},${REVOKE[1]},${z}`,
+          { before: revokeBefore[i], after: revokeAfter[i] })
+      }
+      const exact = (projection, side) => projection && !projection.unexpected.length &&
+        projection.blocks.length === revoked && new Set(projection.blocks.map(change => change.cell)).size === revoked &&
+        projection.blocks.every(change => expectedCells.has(change.cell) &&
+          expectedCells.get(change.cell)[side] === change.state) &&
+        projection.tiles.every(cell => expectedCells.has(cell)) && new Set(projection.tiles).size === projection.tiles.length
+      check('revoked-history-exact', entry && expectedCells.size === revoked &&
+        historyCells.operation === entry.operation && historyCells.undo?.records === historyCells.rawSize &&
+        historyCells.redo?.records === historyCells.rawSize && exact(historyCells.undo, 'before') && exact(historyCells.redo, 'after'),
+      { entry, revoked, historyCells })
 
       await verifyAll(send, '')
       const coverage = await probe(send, 'coverage')

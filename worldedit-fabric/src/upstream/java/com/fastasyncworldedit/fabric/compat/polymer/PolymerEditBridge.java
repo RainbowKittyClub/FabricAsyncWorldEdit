@@ -236,8 +236,15 @@ public final class PolymerEditBridge implements EditIntegration {
                     || !FabricAdapter.adapt(change.after()).getAsString().equals(delta.after().id())) {
                 throw new IllegalStateException("Polymer state disagreement at " + change.pos());
             }
-            if (!Objects.equals(frozen(change.beforeNbt()), delta.before().nbt())
-                    || !Objects.equals(frozen(change.afterNbt()), delta.after().nbt())) {
+            // Polymer observes physical block-entity NBT, never FAWE's explicit-absence envelope.
+            if (com.fastasyncworldedit.fabric.edit.PositionDataTransport.valuesPresent(delta.before().nbt())
+                    || com.fastasyncworldedit.fabric.edit.PositionDataTransport.valuesPresent(delta.after().nbt())) {
+                throw new IllegalStateException("Polymer direct receipt carries present owner data at " + change.pos());
+            }
+            if (!Objects.equals(frozen(change.beforeNbt()), frozen(
+                    com.fastasyncworldedit.fabric.edit.PositionDataTransport.blockEntity(delta.before().nbt())))
+                    || !Objects.equals(frozen(change.afterNbt()), frozen(
+                    com.fastasyncworldedit.fabric.edit.PositionDataTransport.blockEntity(delta.after().nbt())))) {
                 throw new IllegalStateException("Polymer NBT disagreement at " + change.pos());
             }
         }

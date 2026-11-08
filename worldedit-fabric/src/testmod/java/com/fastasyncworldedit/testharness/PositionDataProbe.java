@@ -30,6 +30,7 @@ final class PositionDataProbe {
     static Object run(MinecraftServer server, String[] words) {
         var registry = PositionDataRegistry.get(server);
         if (words[1].equals("list")) return registry.versions();
+        if (words[1].equals("empty-stable")) return registry.emptyStableOwners();
         var level = server.overworld();
         var pos = new BlockPos(Integer.parseInt(words[2]), Integer.parseInt(words[3]), Integer.parseInt(words[4]));
         if (words[1].equals("unknown") || words[1].equals("clear-unknown")) {

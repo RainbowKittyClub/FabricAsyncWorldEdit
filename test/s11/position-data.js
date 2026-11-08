@@ -76,6 +76,9 @@ module.exports = ({ rig, check }) => {
       const owners = await probe(send, 'positions list')
       check('positions:every-provisioned-owner-discovered', owners['chopt:placed_logs'] === 1 &&
         owners['terraform:small_log_leaves'] === 1 && Object.keys(owners).length === 2, owners)
+      const stableOwners = await probe(send, 'positions empty-stable')
+      check('positions:empty-stable-owners-explicit', Array.isArray(stableOwners) && stableOwners.length === 1 &&
+        stableOwners.includes('chopt:placed_logs') && !stableOwners.includes('terraform:small_log_leaves'), stableOwners)
       const catalog = (await probe(send, 'catalog terrestria')).blocks
       const log = [...catalog].sort((a, b) => a.id.localeCompare(b.id)).find(c => c.class.endsWith('.SmallLogBlock'))
       if (!log) throw new Error('No provisioned Terraform small log')

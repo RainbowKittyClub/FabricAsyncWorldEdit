@@ -259,11 +259,16 @@ public final class FabricWorldAccess {
         return null;
     }
 
-    /** Whether either side of this delta holds a block entity; such cells count against the 64. */
+    /** Real NBT and owners without an empty-stability guarantee retain the 64 heavy-cell bound. */
     public boolean blockEntityCell(EditDelta delta) {
-        return delta.kind() == EditDelta.Kind.BLOCK && (delta.before().nbt() != null || delta.after().nbt() != null
-                || mapping.nativeState(delta.before().id()).hasBlockEntity()
-                || mapping.nativeState(delta.after().id()).hasBlockEntity());
+        return delta.kind() == EditDelta.Kind.BLOCK && (mapping.nativeState(delta.before().id()).hasBlockEntity()
+                || mapping.nativeState(delta.after().id()).hasBlockEntity()
+                || !PositionDataRegistry.stableWhenEmpty(mapping.nativeState(delta.before().id()))
+                || !PositionDataRegistry.stableWhenEmpty(mapping.nativeState(delta.after().id()))
+                || PositionDataTransport.blockEntity(delta.before().nbt()) != null
+                || PositionDataTransport.blockEntity(delta.after().nbt()) != null
+                || PositionDataTransport.valuesPresent(delta.before().nbt())
+                || PositionDataTransport.valuesPresent(delta.after().nbt()));
     }
 
     // Both writers require the same payload/lifecycle capabilities before changing anything.
@@ -350,14 +355,14 @@ public final class FabricWorldAccess {
             if (delta.kind() != EditDelta.Kind.BLOCK) return false;
             var before = mapping.nativeState(delta.before().id());
             var after = mapping.nativeState(delta.after().id());
-            if (before.hasBlockEntity() || after.hasBlockEntity() || !directSafe(before) || !directSafe(after)) {
+            if (blockEntityCell(delta) || !directSafe(before) || !directSafe(after)) {
                 return false;
             }
             if (chunk == null) {
                 chunk = loadedChunk(level, delta.x() >> 4, delta.z() >> 4);
                 var attachments = ((net.fabricmc.fabric.impl.attachment.AttachmentTargetImpl) chunk)
                         .fabric_getAttachments();
-                // Portable owners use normal lifecycle hooks, not Polymer's bulk participant route.
+                // No registered or unknown stored data may be skipped by a direct installation.
                 if (attachments != null && !attachments.isEmpty()) return false;
             } else if (delta.x() >> 4 != chunk.getPos().x() || delta.z() >> 4 != chunk.getPos().z()) {
                 return false;
@@ -376,10 +381,7 @@ public final class FabricWorldAccess {
         Map<Integer, List<EditDelta>> sections = new LinkedHashMap<>();
         List<List<EditDelta>> units = new ArrayList<>();
         for (EditDelta delta : deltas) {
-            if (delta.kind() == EditDelta.Kind.BLOCK
-                    && delta.before().nbt() == null && delta.after().nbt() == null
-                    && !mapping.nativeState(delta.before().id()).hasBlockEntity()
-                    && !mapping.nativeState(delta.after().id()).hasBlockEntity()) {
+            if (delta.kind() == EditDelta.Kind.BLOCK && !blockEntityCell(delta)) {
                 sections.computeIfAbsent(delta.y() >> 4, ignored -> new ArrayList<>()).add(delta);
             } else {
                 units.add(List.of(delta));
@@ -405,12 +407,8 @@ public final class FabricWorldAccess {
         if (deltas.isEmpty()) return;
         EditDelta first = deltas.getFirst();
         if (directSections) {
-            for (EditDelta delta : deltas) {
-                if (delta.kind() != EditDelta.Kind.BLOCK
-                        || mapping.nativeState(delta.before().id()).hasBlockEntity()
-                        || mapping.nativeState(delta.after().id()).hasBlockEntity()) {
-                    throw new IllegalStateException("Direct-section route received a lifecycle cell");
-                }
+            if (!directSectionEligible(level, deltas)) {
+                throw new IllegalStateException("Direct-section route lost full payload/section eligibility");
             }
             LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
             var section = chunk.getSection(chunk.getSectionIndex(first.y()));
@@ -423,9 +421,7 @@ public final class FabricWorldAccess {
                 && !mapping.nativeState(first.before().id()).hasBlockEntity()
                 && !mapping.nativeState(first.after().id()).hasBlockEntity()) {
             LevelChunk chunk = loadedChunk(level, first.x() >> 4, first.z() >> 4);
-            var section = chunk.getSection(chunk.getSectionIndex(first.y()));
-            if (section.maybeHas(state -> !directSafe(state)) || deltas.stream().anyMatch(delta ->
-                    !directSafe(mapping.nativeState(delta.before().id())) || !directSafe(mapping.nativeState(delta.after().id())))) {
+            if (!directSectionEligible(level, deltas)) {
                 for (EditDelta delta : deltas) {
                     write(level, delta, effects);
                     fallbackWrites++;
@@ -600,7 +596,7 @@ public final class FabricWorldAccess {
 
     // Whether a block may be installed into a section directly: no mod hook is skipped for it.
     private static boolean directSafe(net.minecraft.world.level.block.state.BlockState state) {
-        return !PositionDataRegistry.portable(state)
+        return PositionDataRegistry.stableWhenEmpty(state)
                 && LifecycleDeclarations.directSafe(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 

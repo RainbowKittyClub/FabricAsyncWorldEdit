@@ -91,6 +91,9 @@ public final class S11Probe implements ModInitializer {
 
     private static String run(MinecraftServer server, String[] words) {
         switch (words[0]) {
+            case "history-cells" -> {
+                return GSON.toJson(HistoryCellsProbe.run(server, words[1]));
+            }
             case "positions" -> {
                 return GSON.toJson(PositionDataProbe.run(server, words));
             }

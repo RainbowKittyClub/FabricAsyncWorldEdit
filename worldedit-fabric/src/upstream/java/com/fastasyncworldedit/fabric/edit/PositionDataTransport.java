@@ -35,6 +35,20 @@ public final class PositionDataTransport {
         return FrozenNbt.capture(positions);
     }
 
+    /** Whether a full block carries an actual owner value rather than explicit absence alone. */
+    public static boolean valuesPresent(FrozenNbt frozen) {
+        FrozenNbt positions = positions(frozen);
+        if (positions == null) return false;
+        CompoundTag payload = positions.thaw();
+        for (String id : payload.keySet()) {
+            if (!(payload.get(id) instanceof CompoundTag entry)) {
+                throw new IllegalArgumentException("Malformed position-data owner " + id);
+            }
+            if (entry.contains("value")) return true;
+        }
+        return false;
+    }
+
     /** Strip core-only data before vanilla validates or loads a real block-entity payload. */
     public static CompoundTag blockEntity(FrozenNbt frozen) {
         if (frozen == null) return null;
