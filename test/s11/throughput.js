@@ -263,6 +263,22 @@ module.exports = ({ rig, check, paced, ledgered, ledgerDb }) => {
         readBack.flushed === 'minecraft:diamond_block', readBack)
 
       await verifyAll(send, '')
+      if (postgres) {
+        // Database-side evidence, not a faster wall clock: producer actions must actually batch.
+        // Includes ordinary action traffic, so a producer path still issuing one INSERT per row
+        // cannot hide behind the separately batched receipt inserts.
+        const stats = ledgerDb.query(`SELECT COALESCE(SUM(calls), 0)::bigint AS calls,
+          COALESCE(SUM(rows), 0)::bigint AS rows FROM pg_stat_statements
+          WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND query LIKE 'INSERT INTO actions %'`)[0]
+        check('postgres-actions-are-batched', stats.rows >= 8192 && stats.calls > 0 &&
+          stats.rows / stats.calls >= 32, stats)
+        const links = ledgerDb.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE a.id IS NULL OR
+          (a.extra_data::json ->> 'sequence')::bigint IS DISTINCT FROM r.sequence OR
+          (a.extra_data::json ->> 'operation') IS DISTINCT FROM r.operation_id::text) AS wrong
+          FROM producer_receipts r LEFT JOIN actions a ON a.id = r.action_id WHERE r.producer = 'fawe'`)[0]
+        check('postgres-producer-links-are-exact', links.total >= 8192 && links.wrong === 0, links)
+      }
       await send('save-all flush')
     },
     async restart (rig, send) {

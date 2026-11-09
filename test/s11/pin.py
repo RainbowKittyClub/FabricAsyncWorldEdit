@@ -48,6 +48,9 @@ s8 = json.loads((root / 'test/s8/manifest.json').read_text())
 audit = ['ledger-rkc', 'kotlin', 'universal-ledger', 'opac', 'forge-config']
 for key in audit:
     deps[key] = s8['availableDependencies'][key]
+# S14: unique local-only Ledger build; earlier accepted S10a pins remain archived unchanged.
+deps['ledger-rkc'] = pin(Path('/mnt/WORKSPACE/scratchpad/fawe-s11-evidence/artifacts/ledger-producer-batching-rkc.3-fawe.1/'
+                              'ledger-1.3.25-rkc.3-fawe.1+local.jar'))
 manifest['profiles']['ledger-audit'] = ['candidate', 'fabric-api', 'lifecycle-probe', *audit]
 # The polymer suite: the polymer set beside S7's fixture overlays, from the Polymer worktree's pins.
 s7 = json.loads(Path('/home/kgadberry/projects/minecraft-dev/rkc/forks/polymer/.claude/worktrees/'
